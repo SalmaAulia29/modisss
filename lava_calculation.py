@@ -39,5 +39,6 @@ def recalculate_lava_volumes():
                effusion_cold,effusion_hot,heat_flux_cold,heat_flux_hot,volume_cold,volume_hot,cumulative_cold,cumulative_hot)
               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", values)
         db.commit()
-        read.close(); write.close()
+        read.close()
+        write.close()
     return len(values)

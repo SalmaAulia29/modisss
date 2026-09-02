@@ -2,6 +2,10 @@
 
 Dashboard Flask untuk memantau collector data MODIS, data terbaru per gunung, jumlah baris baru, respons HTTP, serta riwayat kegagalan. MySQL, web, dan worker berjalan sebagai container terpisah.
 
+Dashboard menampilkan status worker dan hitung mundur pengambilan berikutnya. Jadwal ini
+berasal dari tabel `worker_state`, sehingga tetap akurat ketika halaman browser ditutup
+atau dibuka kembali.
+
 ## Menjalankan
 
 ```bash
@@ -12,6 +16,8 @@ docker compose ps
 Buka `http://localhost:5050`. Dashboard diperbarui otomatis setiap 30 detik. Status JSON tersedia di `http://localhost:5050/api/status` dan health check di `/health`.
 
 Halaman estimasi volume lava tersedia di `http://localhost:5050/lava-volume`.
+
+Status worker dalam format JSON tersedia di `http://localhost:5050/api/worker-status`.
 
 Database dapat dibuka melalui Adminer di `http://localhost:8081` dengan server `db`, pengguna dan password sesuai `.env`, serta database `db_modis_pvmbg`.
 

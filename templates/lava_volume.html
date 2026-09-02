@@ -1,6 +1,53 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Estimasi Volume Lava</title>
-<style>:root{--bg:#07111f;--card:#0e1d30;--line:#21334b;--text:#edf4ff;--muted:#91a4bd;--cyan:#43d7c4;--amber:#f5bd4f}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#12304b 0,transparent 35%),var(--bg);color:var(--text);font:14px system-ui,sans-serif}.wrap{max-width:1400px;margin:auto;padding:34px 20px}a{color:var(--cyan);text-decoration:none}header{display:flex;justify-content:space-between;align-items:center}h1{margin:8px 0}p,.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:25px 0}.card,.formula{background:linear-gradient(145deg,#11243a,#0b1727);border:1px solid var(--line);border-radius:14px;padding:18px}.metric{font-size:25px;font-weight:750;margin-top:8px}.formula{line-height:1.8}.table{overflow:auto;border:1px solid var(--line);border-radius:14px;margin-top:15px}table{width:100%;border-collapse:collapse;background:#0b1829}th,td{text-align:right;padding:12px 13px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-size:11px;text-transform:uppercase}th:nth-child(-n+3),td:nth-child(-n+3){text-align:left}.cold{color:var(--cyan)}.hot{color:var(--amber)}@media(max-width:650px){header{align-items:flex-start;flex-direction:column}}</style></head>
-<body><div class="wrap"><header><div><a href="/">← Dashboard</a><h1>Estimasi Volume Lava</h1><p>Integrasi laju volume dari radiansi termal MODIS Band 21</p></div></header>
-<section class="grid">{% for s in summary %}<article class="card"><span class="muted">{{ s.name }} · {{ s.observations }} observasi</span><div class="metric cold">{{ '%.2f'|format(s.cumulative_cold) }} m³</div><small class="muted">Kumulatif cold</small><div class="metric hot">{{ '%.2f'|format(s.cumulative_hot) }} m³</div><small class="muted">Kumulatif hot</small></article>{% endfor %}</section>
-<section class="formula"><b>Rumus yang digunakan</b><br>ΣB21 dan MAX(B21) dihitung untuk setiap gunung pada datetime yang sama.<br>E<sub>cold</sub> = max(0; 0,450 × ΣB21 − 0,127) &nbsp;·&nbsp; E<sub>hot</sub> = max(0; 0,164 × ΣB21 − 0,045)<br>Heat flux = E × densitas panas &nbsp;·&nbsp; Volume interval = E × Δt &nbsp;·&nbsp; Volume kumulatif = Σ volume interval<br><span class="muted">Densitas: cold {{ '{:,.0f}'.format(cold_density) }} J/m³; hot {{ '{:,.0f}'.format(hot_density) }} J/m³. Observasi pertama memakai Δt = 0.</span></section>
-<h2>Detail perhitungan</h2><div class="table"><table><thead><tr><th>ID</th><th>Gunung</th><th>Datetime</th><th>Pixel</th><th>ΣB21</th><th>MAX B21</th><th>Δt (detik)</th><th>E cold (m³/s)</th><th>E hot (m³/s)</th><th>Heat cold (W)</th><th>Heat hot (W)</th><th>Volume cold (m³)</th><th>Volume hot (m³)</th><th>Kumulatif cold (m³)</th><th>Kumulatif hot (m³)</th></tr></thead><tbody>{% for r in rows %}<tr><td>{{ r.id }}</td><td>{{ r.volcano_name }}</td><td>{{ r.observation_datetime }}</td><td>{{ r.pixel_count }}</td><td>{{ '%.3f'|format(r.sum_b21) }}</td><td>{{ '%.3f'|format(r.max_b21) }}</td><td>{{ r.delta_seconds }}</td><td>{{ '%.4f'|format(r.effusion_cold) }}</td><td>{{ '%.4f'|format(r.effusion_hot) }}</td><td>{{ '%.2e'|format(r.heat_flux_cold) }}</td><td>{{ '%.2e'|format(r.heat_flux_hot) }}</td><td>{{ '%.2f'|format(r.volume_cold) }}</td><td>{{ '%.2f'|format(r.volume_hot) }}</td><td>{{ '%.2f'|format(r.cumulative_cold) }}</td><td>{{ '%.2f'|format(r.cumulative_hot) }}</td></tr>{% else %}<tr><td colspan="15">Belum ada hasil perhitungan.</td></tr>{% endfor %}</tbody></table></div></div></body></html>
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estimasi Volume Lava</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='lava.css') }}">
+</head>
+<body>
+  <main class="container">
+    <header class="page-header"><div>
+      <a class="eyebrow" href="{{ url_for('dashboard') }}">← KEMBALI KE DASHBOARD</a>
+      <h1>Estimasi Volume Lava</h1>
+      <p>Integrasi laju volume berdasarkan radiansi termal MODIS Band 21.</p>
+    </div></header>
+
+    <section class="volcano-grid">
+      {% for item in summary %}<article class="card volcano-card">
+        <span class="muted">{{ item.name }} · {{ item.observations }} observasi</span>
+        <h2 class="cold-value">{{ '%.2f'|format(item.cumulative_cold) }} m³</h2><span class="muted">Kumulatif cold</span>
+        <h2 class="hot-value">{{ '%.2f'|format(item.cumulative_hot) }} m³</h2><span class="muted">Kumulatif hot</span>
+      </article>{% endfor %}
+    </section>
+
+    <section class="card formula-card">
+      <h2>Metode Perhitungan</h2>
+      <p>ΣB21 dan MAX(B21) dihitung untuk setiap gunung pada waktu pengamatan yang sama.</p>
+      <code>E<sub>cold</sub> = max(0; 0,450 × ΣB21 − 0,127)</code>
+      <code>E<sub>hot</sub> = max(0; 0,164 × ΣB21 − 0,045)</code>
+      <p>Heat flux = E × densitas panas · Volume interval = E × Δt · Volume kumulatif = Σ volume interval.</p>
+      <small class="muted">Densitas cold {{ '{:,.0f}'.format(cold_density) }} J/m³ · hot {{ '{:,.0f}'.format(hot_density) }} J/m³. Observasi pertama memakai Δt = 0.</small>
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Detail Perhitungan</h2><span>Urutan waktu terbaru</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr>{% for heading in ['ID','Gunung','Datetime','Pixel','ΣB21','MAX B21','Δt (detik)','E cold (m³/s)','E hot (m³/s)','Heat cold (W)','Heat hot (W)','Volume cold (m³)','Volume hot (m³)','Kumulatif cold (m³)','Kumulatif hot (m³)'] %}<th>{{ heading }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for row in rows %}<tr>
+            <td>{{ row.id }}</td><td>{{ row.volcano_name }}</td><td>{{ row.observation_datetime }}</td><td>{{ row.pixel_count }}</td>
+            <td>{{ '%.3f'|format(row.sum_b21) }}</td><td>{{ '%.3f'|format(row.max_b21) }}</td><td>{{ row.delta_seconds }}</td>
+            <td>{{ '%.4f'|format(row.effusion_cold) }}</td><td>{{ '%.4f'|format(row.effusion_hot) }}</td>
+            <td>{{ '%.2e'|format(row.heat_flux_cold) }}</td><td>{{ '%.2e'|format(row.heat_flux_hot) }}</td>
+            <td>{{ '%.2f'|format(row.volume_cold) }}</td><td>{{ '%.2f'|format(row.volume_hot) }}</td>
+            <td>{{ '%.2f'|format(row.cumulative_cold) }}</td><td>{{ '%.2f'|format(row.cumulative_hot) }}</td>
+          </tr>{% else %}<tr><td colspan="15" class="empty">Belum ada hasil perhitungan.</td></tr>{% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,7 +1,88 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="{{ refresh }}"><title>MODIS Monitor</title>
-<style>:root{--bg:#07111f;--card:#0e1d30;--line:#21334b;--text:#edf4ff;--muted:#91a4bd;--cyan:#43d7c4;--red:#ff6b78;--amber:#f5bd4f}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#12304b 0,transparent 35%),var(--bg);color:var(--text);font:14px system-ui,sans-serif}.wrap{max-width:1200px;margin:auto;padding:36px 20px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}h1{margin:0;font-size:28px}header p,.muted{color:var(--muted)}.live{color:var(--cyan);font-weight:700}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.card{background:linear-gradient(145deg,#11243a,#0b1727);border:1px solid var(--line);border-radius:14px;padding:18px}.metric{font-size:28px;font-weight:750;margin-top:8px}.volcanoes{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin:24px 0}.volcano h3{margin:0 0 14px}.row{display:flex;justify-content:space-between;margin-top:9px;color:var(--muted)}.row b{color:var(--text)}h2{font-size:17px;margin-top:28px}.table{overflow:auto;border:1px solid var(--line);border-radius:14px}table{width:100%;border-collapse:collapse;background:#0b1829}th,td{text-align:left;padding:13px 14px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-size:12px;text-transform:uppercase}.badge{padding:4px 9px;border-radius:99px;background:#27364a}.success{color:var(--cyan);background:#103a38}.failed{color:var(--red);background:#401f29}.running{color:var(--amber);background:#3f3420}.no_data{color:#a9bdd5}@media(max-width:700px){.grid{grid-template-columns:repeat(2,1fr)}header{align-items:flex-start;flex-direction:column}}</style></head>
-<body><div class="wrap"><header><div><h1>MODIS Volcano Monitor</h1><p>Pemantauan collector hotspot gunung api · <a href="/lava-volume" style="color:var(--cyan)">Estimasi Volume Lava →</a></p></div><span class="live">● SISTEM AKTIF</span></header>
-<section class="grid"><div class="card"><span class="muted">Total Data MODIS</span><div class="metric">{{ totals.total_data or 0 }}</div></div><div class="card"><span class="muted">Total proses</span><div class="metric">{{ totals.total_runs or 0 }}</div></div><div class="card"><span class="muted">Berhasil</span><div class="metric">{{ totals.success_runs or 0 }}</div></div><div class="card"><span class="muted">Gagal</span><div class="metric">{{ totals.failed_runs or 0 }}</div></div><div class="card"><span class="muted">Data baru</span><div class="metric">{{ totals.inserted or 0 }}</div></div></section>
-<section class="grid volcanoes">{% for v in summary %}<article class="card volcano"><h3>▲ {{ v.name }}</h3><div class="row"><span>Total deteksi</span><b>{{ v.total_data }}</b></div><div class="row"><span>Data terakhir</span><b>{{ v.last_data or '-' }}</b></div><div class="row"><span>Pengecekan</span><b>{{ v.last_check or '-' }}</b></div><div class="row"><span>Status</span><span class="badge {{ v.last_status }}">{{ v.last_status or 'belum berjalan' }}</span></div></article>{% endfor %}</section>
-<h2>Data MODIS <span class="muted">(diurutkan berdasarkan ID)</span></h2><div class="table"><table><thead><tr><th>ID</th><th>Gunung</th><th>UNIX Time</th><th>Satelit</th><th>Datetime</th><th>Longitude</th><th>Latitude</th><th>B21</th><th>B22</th><th>B6</th><th>B31</th><th>B32</th><th>SatZen</th><th>SatAzi</th><th>SunZen</th><th>SunAzi</th><th>Line</th><th>Samp</th><th>Nti</th><th>Glint</th><th>Excess</th><th>Temp</th><th>Err</th><th>Disimpan</th></tr></thead><tbody>{% for d in modis_rows %}<tr><td>{{ d.id }}</td><td>{{ d.volcano_name }}</td><td>{{ d.UNIX_Time }}</td><td>{{ d.Sat }}</td><td>{{ d.datetime }}</td><td>{{ d.Longitude }}</td><td>{{ d.Latitude }}</td><td>{{ d.B21 }}</td><td>{{ d.B22 }}</td><td>{{ d.B6 }}</td><td>{{ d.B31 }}</td><td>{{ d.B32 }}</td><td>{{ d.SatZen }}</td><td>{{ d.SatAzi }}</td><td>{{ d.SunZen }}</td><td>{{ d.SunAzi }}</td><td>{{ d.Line }}</td><td>{{ d.Samp }}</td><td>{{ d.Nti }}</td><td>{{ d.Glint }}</td><td>{{ d.Excess }}</td><td>{{ d.Temp }}</td><td>{{ d.Err }}</td><td>{{ d.created_at }}</td></tr>{% else %}<tr><td colspan="24">Belum ada data MODIS tersimpan.</td></tr>{% endfor %}</tbody></table></div>
-<h2>Riwayat pengambilan data</h2><div class="table"><table><thead><tr><th>Mulai</th><th>Gunung</th><th>Tanggal target</th><th>Status</th><th>Diterima</th><th>Baru</th><th>HTTP</th><th>Pesan</th></tr></thead><tbody>{% for r in runs %}<tr><td>{{ r.started_at }}</td><td>{{ r.volcano_name }}</td><td>{{ r.target_date }}</td><td><span class="badge {{ r.status }}">{{ r.status }}</span></td><td>{{ r.rows_received }}</td><td>{{ r.rows_inserted }}</td><td>{{ r.http_status or '-' }}</td><td title="{{ r.message }}">{{ (r.message or '-')|truncate(55) }}</td></tr>{% else %}<tr><td colspan="8">Belum ada proses collector.</td></tr>{% endfor %}</tbody></table></div></div></body></html>
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="refresh-seconds" content="{{ refresh_seconds }}">
+  <title>MODIS Monitor</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <script defer src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</head>
+<body>
+  <main class="container">
+    <header class="page-header">
+      <div>
+        <span class="eyebrow">PVMBG · SATELLITE MONITORING</span>
+        <h1>MODIS Volcano Monitor</h1>
+        <p>Pemantauan otomatis hotspot gunung api dan estimasi volume lava.</p>
+      </div>
+      <a class="button" href="{{ url_for('lava_volume') }}">Estimasi Volume Lava →</a>
+    </header>
+
+    <section class="worker-panel" data-seconds="{{ worker.seconds_remaining or 0 }}">
+      <div>
+        <span class="status-dot status-{{ worker.status }}"></span>
+        <strong>Worker {{ worker.status or 'unknown' }}</strong>
+        <span class="muted">· interval {{ worker.interval_minutes or '-' }} menit</span>
+      </div>
+      <div class="countdown-wrap">
+        <span class="muted">Pengambilan berikutnya</span>
+        <strong id="countdown">--:--</strong>
+      </div>
+    </section>
+
+    {% if worker.last_error %}<div class="alert"><strong>Kesalahan worker:</strong> {{ worker.last_error }}</div>{% endif %}
+
+    <section class="metrics">
+      <article class="card"><span>Total Data MODIS</span><strong>{{ totals.total_data }}</strong></article>
+      <article class="card"><span>Total Proses</span><strong>{{ totals.total_runs }}</strong></article>
+      <article class="card"><span>Berhasil</span><strong>{{ totals.success_runs }}</strong></article>
+      <article class="card"><span>Gagal</span><strong>{{ totals.failed_runs }}</strong></article>
+      <article class="card"><span>Data Baru</span><strong>{{ totals.inserted }}</strong></article>
+    </section>
+
+    <section class="volcano-grid">
+      {% for volcano in volcanoes %}
+        <article class="card volcano-card">
+          <h2>▲ {{ volcano.name }}</h2>
+          <dl>
+            <div><dt>Total deteksi</dt><dd>{{ volcano.total_data }}</dd></div>
+            <div><dt>Data terakhir</dt><dd>{{ volcano.last_data or '-' }}</dd></div>
+            <div><dt>Pengecekan</dt><dd>{{ volcano.last_check or '-' }}</dd></div>
+            <div><dt>Status</dt><dd><span class="badge badge-{{ volcano.last_status }}">{{ volcano.last_status or 'belum berjalan' }}</span></dd></div>
+          </dl>
+        </article>
+      {% endfor %}
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Data MODIS</h2><span>Diurutkan berdasarkan ID · maksimal 100 baris</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr>{% for heading in ['ID','Gunung','UNIX Time','Satelit','Datetime','Longitude','Latitude','B21','B22','B6','B31','B32','SatZen','SatAzi','SunZen','SunAzi','Line','Samp','NTI','Glint','Excess','Temp','Err','Disimpan'] %}<th>{{ heading }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for row in modis_rows %}<tr>
+            <td>{{ row.id }}</td><td>{{ row.volcano_name }}</td><td>{{ row.UNIX_Time }}</td><td>{{ row.Sat }}</td><td>{{ row.datetime }}</td>
+            <td>{{ row.Longitude }}</td><td>{{ row.Latitude }}</td><td>{{ row.B21 }}</td><td>{{ row.B22 }}</td><td>{{ row.B6 }}</td><td>{{ row.B31 }}</td><td>{{ row.B32 }}</td>
+            <td>{{ row.SatZen }}</td><td>{{ row.SatAzi }}</td><td>{{ row.SunZen }}</td><td>{{ row.SunAzi }}</td><td>{{ row.Line }}</td><td>{{ row.Samp }}</td>
+            <td>{{ row.Nti }}</td><td>{{ row.Glint }}</td><td>{{ row.Excess }}</td><td>{{ row.Temp }}</td><td>{{ row.Err }}</td><td>{{ row.created_at }}</td>
+          </tr>{% else %}<tr><td colspan="24" class="empty">Belum ada data MODIS tersimpan.</td></tr>{% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Riwayat Pengambilan</h2><span>50 proses terakhir</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Mulai</th><th>Gunung</th><th>Tanggal Target</th><th>Status</th><th>Diterima</th><th>Baru</th><th>HTTP</th><th>Pesan</th></tr></thead>
+        <tbody>
+          {% for run in runs %}<tr>
+            <td>{{ run.started_at }}</td><td>{{ run.volcano_name }}</td><td>{{ run.target_date }}</td>
+            <td><span class="badge badge-{{ run.status }}">{{ run.status }}</span></td><td>{{ run.rows_received }}</td><td>{{ run.rows_inserted }}</td><td>{{ run.http_status or '-' }}</td>
+            <td title="{{ run.message }}">{{ (run.message or '-')|truncate(60) }}</td>
+          </tr>{% else %}<tr><td colspan="8" class="empty">Belum ada proses collector.</td></tr>{% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+  </main>
+</body>
+</html>

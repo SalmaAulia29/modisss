@@ -1,8 +1,8 @@
-import os
 import time
 from pathlib import Path
 
 from connect_db import get_connection
+from schema import ensure_schema
 
 DUMP_FILE = Path(__file__).with_name("db_modis_pvmbg_railway.sql")
 
@@ -39,6 +39,7 @@ def bootstrap_database(retries=12, delay=5):
                     cursor.execute("SELECT RELEASE_LOCK('modis_database_bootstrap')")
                     cursor.fetchone()
                     cursor.close()
+            ensure_schema()
             return
         except Exception as exc:
             last_error = exc

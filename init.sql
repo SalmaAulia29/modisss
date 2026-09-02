@@ -25,3 +25,10 @@ CREATE TABLE IF NOT EXISTS lava_volume_calculations (
   UNIQUE KEY uq_lava_observation (volcano_id,observation_datetime),
   CONSTRAINT fk_lava_volcano FOREIGN KEY (volcano_id) REFERENCES volcanoes(id)
 );
+CREATE TABLE IF NOT EXISTS worker_state (
+  id TINYINT PRIMARY KEY, status VARCHAR(20) NOT NULL DEFAULT 'idle', interval_minutes INT NOT NULL DEFAULT 60,
+  last_started_at DATETIME NULL, last_completed_at DATETIME NULL, next_run_at DATETIME NULL,
+  last_error TEXT NULL, worker VARCHAR(100) NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+INSERT IGNORE INTO worker_state (id,status,interval_minutes) VALUES (1,'idle',60);
