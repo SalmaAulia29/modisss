@@ -1,0 +1,43 @@
+services:
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile.mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-db_modis_pvmbg}
+      MYSQL_USER: ${DB_USER:-modis}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-modis_password}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
+      TZ: ${TZ:-Asia/Jakarta}
+    volumes:
+      - modis_db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports: ["${WEB_PORT:-5000}:5000"]
+    depends_on:
+      db: {condition: service_healthy}
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-c", "from update_modis import worker_loop; worker_loop()"]
+    env_file: .env
+    depends_on:
+      db: {condition: service_healthy}
+  adminer:
+    image: adminer:4.8.1
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports: ["${ADMINER_PORT:-8081}:8080"]
+    depends_on:
+      db: {condition: service_healthy}
+volumes:
+  modis_db:

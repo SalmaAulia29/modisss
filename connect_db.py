@@ -1,15 +1,14 @@
+import os
 import mysql.connector
 
 
 def get_connection():
-  try:
-    db = mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="",  
-        database="db_modis_pvmbg", 
+    """Membuka koneksi memakai konfigurasi environment/Docker."""
+    return mysql.connector.connect(
+        host=os.getenv("DB_HOST", "db"),
+        port=int(os.getenv("DB_PORT", "3306")),
+        user=os.getenv("DB_USER", "modis"),
+        password=os.getenv("DB_PASSWORD", "modis_password"),
+        database=os.getenv("DB_NAME", "db_modis_pvmbg"),
+        connection_timeout=10,
     )
-    return db
-  except mysql.connector.Error as err:
-    print(f"[ERROR] Gagal konek ke database: {err}")
-    return None

@@ -1,177 +1,118 @@
+import os
+import socket
+import time
 from datetime import datetime, timedelta
-import mysql.connector
 import requests
 from connect_db import get_connection
+from lava_calculation import recalculate_lava_volumes
 
-# ==============================
-# KONFIGURASI GUNUNG & PARAMETER SPASIAL (BOUNDING BOX URL)
-# ==============================
 GUNUNG = {
-    "Gunung Ibu": {
-        "volcano_id": 1,
-        "lonmin": 127.50,
-        "lonmax": 127.75,
-        "latmin": 1.35,
-        "latmax": 1.60,
-    },
-    "Gunung Lewotolok": {
-        "volcano_id": 2,
-        "lonmin": 123.40,
-        "lonmax": 123.60,
-        "latmin": -8.40,
-        "latmax": -8.20,
-    },
+    "Gunung Ibu": {"volcano_id": 1, "lonmin": 127.50, "lonmax": 127.75, "latmin": 1.35, "latmax": 1.60},
+    "Gunung Lewotolok": {"volcano_id": 2, "lonmin": 123.40, "lonmax": 123.60, "latmin": -8.40, "latmax": -8.20},
 }
+SOURCE_URL = os.getenv("MODIS_URL", "http://modis.higp.hawaii.edu/cgi-bin/mergeimage")
+DEFAULT_START_DATE = os.getenv("DEFAULT_START_DATE", "2026-08-25")
 
+def last_date(volcano_id):
+    with get_connection() as db:
+        cursor = db.cursor()
+        cursor.execute("""SELECT
+            (SELECT MAX(datetime) FROM modis_data WHERE volcano_id=%s),
+            (SELECT MAX(target_date) FROM collection_runs WHERE volcano_id=%s AND status IN ('success','no_data'))
+        """, (volcano_id, volcano_id))
+        data_date, checked_date = cursor.fetchone()
+        cursor.close()
+    candidates = [datetime.combine(value, datetime.min.time()) if not isinstance(value, datetime) else value
+                  for value in (data_date, checked_date) if value]
+    if not candidates:
+        return datetime.strptime(DEFAULT_START_DATE, "%Y-%m-%d")
+    return max(candidates)
 
-def cek_tanggal_terakhir_di_db(volcano_id):
-    db = get_connection()
-    if not db:
-        return None
-    cursor = db.cursor()
-    query = "SELECT datetime FROM modis_data WHERE volcano_id = %s ORDER BY datetime DESC LIMIT 1"
-    cursor.execute(query, (volcano_id,))
-    result = cursor.fetchone()
-    cursor.close()
-    db.close()
+def start_run(name, volcano_id, target_date):
+    with get_connection() as db:
+        cursor = db.cursor()
+        cursor.execute("INSERT INTO collection_runs (volcano_id,volcano_name,target_date,status,worker) VALUES (%s,%s,%s,'running',%s)", (volcano_id, name, target_date.date(), socket.gethostname()))
+        db.commit()
+        run_id = cursor.lastrowid
+        cursor.close()
+    return run_id
 
-    if result:
-        tanggal_terakhir = result[0]
-        print(f"[INFO] Data terakhir di database untuk ID {volcano_id}: {tanggal_terakhir.strftime('%Y-%m-%d')}")
-        return tanggal_terakhir
-    else:
-        default_date = datetime(2026, 8, 25)
-        print(f"[INFO] Database kosong. Menggunakan tanggal default: {default_date.strftime('%Y-%m-%d')}")
-        return default_date
+def finish_run(run_id, status, received=0, inserted=0, message=None, http_status=None):
+    with get_connection() as db:
+        cursor = db.cursor()
+        cursor.execute("UPDATE collection_runs SET status=%s,rows_received=%s,rows_inserted=%s,message=%s,http_status=%s,finished_at=NOW() WHERE id=%s", (status, received, inserted, message, http_status, run_id))
+        db.commit()
+        cursor.close()
 
+def parse_rows(text, info):
+    rows = []
+    for line_text in text.splitlines():
+        if not line_text.strip() or line_text.startswith("#") or "UNIX_Time" in line_text:
+            continue
+        col = line_text.split()
+        if len(col) < 25:
+            continue
+        try:
+            dt = datetime(*(int(col[i]) for i in range(2, 7)))
+            lon, lat = float(col[7]), float(col[8])
+            if not (info["lonmin"] <= lon <= info["lonmax"] and info["latmin"] <= lat <= info["latmax"]):
+                continue
+            rows.append((info["volcano_id"], int(col[0]), col[1], dt, lon, lat,
+                         *(float(col[i]) for i in range(9, 18)), int(col[18]), int(col[19]),
+                         *(float(col[i]) for i in range(20, 25))))
+        except (ValueError, TypeError):
+            continue
+    return rows
+
+def collect_date(name, info, target_date):
+    run_id = start_run(name, info["volcano_id"], target_date)
+    params = {"maptype": "alerts", "jyear": target_date.strftime("%Y"), "jday": target_date.strftime("%j"), "jperiod": 1,
+              "lonmin": info["lonmin"], "latmin": info["latmin"], "lonmax": info["lonmax"], "latmax": info["latmax"]}
+    try:
+        response = requests.get(SOURCE_URL, params=params, timeout=30)
+        response.raise_for_status()
+        if "text/html" in response.headers.get("content-type", "").lower():
+            finish_run(run_id, "no_data", message="Server mengembalikan HTML/tidak ada data", http_status=response.status_code)
+            return
+        rows = parse_rows(response.text, info)
+        inserted = 0
+        if rows:
+            with get_connection() as db:
+                cursor = db.cursor()
+                cursor.executemany("""INSERT IGNORE INTO modis_data
+                    (volcano_id,UNIX_Time,Sat,datetime,Longitude,Latitude,B21,B22,B6,B31,B32,SatZen,SatAzi,SunZen,SunAzi,Line,Samp,Nti,Glint,Excess,Temp,Err)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", rows)
+                inserted = cursor.rowcount
+                db.commit()
+                cursor.close()
+        finish_run(run_id, "success" if rows else "no_data", len(rows), inserted, "Selesai" if rows else "Tidak ada hotspot dalam area", response.status_code)
+    except Exception as exc:
+        finish_run(run_id, "failed", message=str(exc)[:1000])
 
 def update_data_modis():
-    print("=" * 60)
-    print("SISTEM PEMBARUAN DATA MODIS OTOMATIS DIMULAI")
-    print("=" * 60)
+    for name, info in GUNUNG.items():
+        target = last_date(info["volcano_id"]) + timedelta(days=1)
+        while target.date() <= datetime.now().date():
+            collect_date(name, info, target)
+            target += timedelta(days=1)
+    recalculate_lava_volumes()
 
-    for nama_gunung, info in GUNUNG.items():
-        print(f"\nMemproses: {nama_gunung}...")
-        last_date = cek_tanggal_terakhir_di_db(info["volcano_id"])
-        if not last_date:
-            print(f"[ERROR] Lewati {nama_gunung} karena gagal koneksi database.")
-            continue
-
-        target_date = last_date + timedelta(days=1)
-        hari_ini = datetime.now()
-
-        while target_date <= hari_ini:
-            tgl_str = target_date.strftime('%Y-%m-%d')
-            print(f"-> Mengecek tanggal: {tgl_str}...")
-
-            jyear = target_date.strftime("%Y")
-            jday = target_date.strftime("%j")
-            periodemodis = 1  # Periode harian agar stabil
-
-            # URL menggunakan parameter koordinat wilayah langsung (lonmin/latmin/lonmax/latmax)
-            url= (
-                f"http://modis.higp.hawaii.edu/cgi-bin/mergeimage?maptype=alerts"
-                f"&jyear={jyear}&jday={jday}&jperiod={periodemodis}"
-                f"&lonmin={info['lonmin']}&latmin={info['latmin']}"
-                f"&lonmax={info['lonmax']}&latmax={info['latmax']}"
-            )
-
-            try:
-                response = requests.get(url_pembimbing, timeout=30)
-                if response.status_code == 200:
-                    data_mentah = response.text.strip()
-
-                    if not data_mentah or "<html>" in data_mentah.lower():
-                        print(f"   [INFO] Tidak ada data dari server untuk tanggal {tgl_str}.")
-                        target_date += timedelta(days=1)
-                        continue
-
-                    baris_data = data_mentah.split("\n")
-                    list_to_insert = []
-
-                    for baris in baris_data:
-                        if not baris.strip() or baris.startswith("#") or "UNIX_Time" in baris:
-                            continue
-
-                        kolom = baris.split()
-                        if len(kolom) >= 25:
-                            try:
-                                unix_time = int(kolom[0])
-                                sat = kolom[1]
-                                year = int(kolom[2])
-                                mo = int(kolom[3])
-                                dy = int(kolom[4])
-                                hr = int(kolom[5])
-                                mn = int(kolom[6])
-
-                                if not (0 <= hr <= 23 and 0 <= mn <= 59 and 1 <= mo <= 12 and 1 <= dy <= 31):
-                                    continue
-
-                                dt_object = datetime(year, mo, dy, hr, mn)
-
-                                lon = float(kolom[7])
-                                lat = float(kolom[8])
-
-                                # Filter keamanan ganda sesuai batas koordinat dictionary
-                                if not (
-                                    info["lonmin"] <= lon <= info["lonmax"]
-                                    and info["latmin"] <= lat <= info["latmax"]
-                                ):
-                                    continue
-
-                                b21 = float(kolom[9])
-                                b22 = float(kolom[10])
-                                b6 = float(kolom[11])
-                                b31 = float(kolom[12])
-                                b32 = float(kolom[13])
-                                sat_zen = float(kolom[14])
-                                sat_azi = float(kolom[15])
-                                sun_zen = float(kolom[16])
-                                sun_azi = float(kolom[17])
-                                line = int(kolom[18])
-                                samp = int(kolom[19])
-                                nti = float(kolom[20])
-                                glint = float(kolom[21])
-                                excess = float(kolom[22])
-                                temp = float(kolom[23])
-                                err = float(kolom[24])
-
-                                list_to_insert.append((
-                                    info["volcano_id"], unix_time, sat, dt_object,
-                                    lon, lat, b21, b22, b6, b31, b32,
-                                    sat_zen, sat_azi, sun_zen, sun_azi,
-                                    line, samp, nti, glint, excess, temp, err
-                                ))
-                            except Exception:
-                                continue
-
-                    if list_to_insert:
-                        db = get_connection()
-                        if db:
-                            cursor = db.cursor()
-                            query_insert = """
-                                INSERT IGNORE INTO modis_data (
-                                    volcano_id, UNIX_Time, Sat, datetime, 
-                                    Longitude, Latitude, B21, B22, B6, B31, B32, 
-                                    SatZen, SatAzi, SunZen, SunAzi, Line, Samp, 
-                                    Nti, Glint, Excess, Temp, Err
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """
-                            cursor.executemany(query_insert, list_to_insert)
-                            db.commit()
-                            print(f"   [SUKSES] Berhasil memasukkan {cursor.rowcount} data baru ke database!")
-                            cursor.close()
-                            db.close()
-                    else:
-                        print(f"   [INFO] Ada respon server untuk {tgl_str}, tapi di luar wilayah koordinat.")
-
-            except Exception as e:
-                print(f"   [ERROR] Gagal terhubung ke server: {e}")
-
-            target_date += timedelta(days=1)
-
-        print(f"--- Proses untuk {nama_gunung} selesai ---\n")
-
+def worker_loop():
+    interval = int(os.getenv("FETCH_INTERVAL_MINUTES", "60")) * 60
+    # Container lama dapat berhenti saat status masih "running" (restart/deploy).
+    with get_connection() as db:
+        cursor = db.cursor()
+        cursor.execute("""UPDATE collection_runs SET status='failed', finished_at=NOW(),
+            message='Proses terputus karena worker dimulai ulang'
+            WHERE status='running' AND worker<>%s""", (socket.gethostname(),))
+        db.commit()
+        cursor.close()
+    while True:
+        try:
+            update_data_modis()
+        except Exception as exc:
+            print(f"[ERROR] Siklus collector gagal: {exc}", flush=True)
+        time.sleep(interval)
 
 if __name__ == "__main__":
     update_data_modis()
