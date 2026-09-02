@@ -98,6 +98,8 @@ def update_data_modis():
     recalculate_lava_volumes()
 
 def worker_loop():
+    from bootstrap_db import bootstrap_database
+    bootstrap_database()
     interval = int(os.getenv("FETCH_INTERVAL_MINUTES", "60")) * 60
     # Container lama dapat berhenti saat status masih "running" (restart/deploy).
     with get_connection() as db:
