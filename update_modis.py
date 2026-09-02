@@ -203,19 +203,32 @@ def update_data_modis():
     return total_inserted
 
 
-def update_worker_state(status, interval_minutes, *, next_run_at=None, error=None, completed=False):
+def update_worker_state(status, interval_minutes, *, wait_seconds=None, error=None, completed=False):
     with get_connection() as connection:
         cursor = connection.cursor()
         cursor.execute(
             """
             UPDATE worker_state
             SET status = %s, interval_minutes = %s, worker = %s,
-                next_run_at = %s, last_error = %s,
+                next_run_at = CASE
+                    WHEN %s IS NULL THEN NULL
+                    ELSE DATE_ADD(NOW(), INTERVAL %s SECOND)
+                END,
+                last_error = %s,
                 last_started_at = IF(%s = 'running', NOW(), last_started_at),
                 last_completed_at = IF(%s, NOW(), last_completed_at)
             WHERE id = 1
             """,
-            (status, interval_minutes, socket.gethostname(), next_run_at, error, status, completed),
+            (
+                status,
+                interval_minutes,
+                socket.gethostname(),
+                wait_seconds,
+                wait_seconds,
+                error,
+                status,
+                completed,
+            ),
         )
         connection.commit()
         cursor.close()
@@ -258,15 +271,14 @@ def worker_loop():
 
         elapsed = time.monotonic() - cycle_started
         wait_seconds = max(1, interval_seconds - elapsed)
-        next_run_at = datetime.now() + timedelta(seconds=wait_seconds)
         update_worker_state(
             "error" if error else "waiting",
             interval_minutes,
-            next_run_at=next_run_at,
+            wait_seconds=int(wait_seconds),
             error=error,
             completed=True,
         )
-        logger.info("Pengambilan berikutnya pada %s", next_run_at.isoformat(timespec="seconds"))
+        logger.info("Pengambilan berikutnya dalam %d detik", int(wait_seconds))
         time.sleep(wait_seconds)
 
 
