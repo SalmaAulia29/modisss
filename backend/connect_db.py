@@ -1,3 +1,5 @@
+"""Konfigurasi koneksi MySQL untuk backend dan worker."""
+
 import os
 import mysql.connector
 

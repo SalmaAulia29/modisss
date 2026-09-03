@@ -1,4 +1,4 @@
-"""Entrypoint service worker untuk Docker dan Railway."""
+"""Entrypoint worker backend untuk Docker dan Railway."""
 
 from update_modis import worker_loop
 

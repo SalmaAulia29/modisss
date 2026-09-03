@@ -2,7 +2,7 @@ services:
   db:
     build:
       context: .
-      dockerfile: Dockerfile.mysql
+      dockerfile: database/Dockerfile
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${DB_NAME:-db_modis_pvmbg}
@@ -17,27 +17,53 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-  web:
-    build: .
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     env_file: .env
-    ports: ["${WEB_PORT:-5000}:5000"]
+    expose:
+      - "5000"
     depends_on:
-      db: {condition: service_healthy}
+      db:
+        condition: service_healthy
+
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     command: ["python", "worker.py"]
     env_file: .env
     depends_on:
-      db: {condition: service_healthy}
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 80
+      BACKEND_URL: http://backend:5000
+    ports:
+      - "${WEB_PORT:-5050}:80"
+    depends_on:
+      - backend
+
   adminer:
     image: adminer:4.8.1
     restart: unless-stopped
     environment:
       ADMINER_DEFAULT_SERVER: db
-    ports: ["${ADMINER_PORT:-8081}:8080"]
+    ports:
+      - "${ADMINER_PORT:-8081}:8080"
     depends_on:
-      db: {condition: service_healthy}
+      db:
+        condition: service_healthy
+
 volumes:
   modis_db:

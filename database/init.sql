@@ -1,3 +1,4 @@
+-- Skema referensi database MODIS.
 CREATE TABLE IF NOT EXISTS volcanoes (
   id INT PRIMARY KEY, name VARCHAR(100) NOT NULL, lonmin DECIMAL(9,5), lonmax DECIMAL(9,5), latmin DECIMAL(9,5), latmax DECIMAL(9,5)
 );

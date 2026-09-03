@@ -1,4 +1,4 @@
-"""Collector MODVOLC dan proses worker berkala."""
+"""Collector MODVOLC dan proses worker backend berkala."""
 
 import logging
 import os
@@ -38,6 +38,7 @@ SOURCE_URL = os.getenv(
     "MODIS_URL", "http://modis.higp.hawaii.edu/cgi-bin/mergeimage"
 )
 DEFAULT_START_DATE = os.getenv("DEFAULT_START_DATE", "2026-08-25")
+LOOKBACK_DAYS = max(1, int(os.getenv("MODIS_LOOKBACK_DAYS", "3")))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))
 INSERT_SQL = """
     INSERT IGNORE INTO modis_data (
@@ -190,11 +191,16 @@ def collect_date(session, volcano_name, volcano, target_date):
 
 def update_data_modis():
     total_inserted = 0
+    today = datetime.now()
+    lookback_start = today - timedelta(days=LOOKBACK_DAYS - 1)
     with requests.Session() as session:
         session.headers.update({"User-Agent": "MODIS-Volcano-Monitor/1.0"})
         for volcano_name, volcano in VOLCANOES.items():
-            target_date = get_last_processed_date(volcano["volcano_id"]) + timedelta(days=1)
-            while target_date.date() <= datetime.now().date():
+            next_unprocessed = get_last_processed_date(volcano["volcano_id"]) + timedelta(days=1)
+            # MODIS dapat mempublikasikan observasi terlambat. Selalu periksa ulang
+            # beberapa hari terakhir; INSERT IGNORE mencegah duplikasi data.
+            target_date = min(next_unprocessed, lookback_start)
+            while target_date.date() <= today.date():
                 total_inserted += collect_date(session, volcano_name, volcano, target_date)
                 target_date += timedelta(days=1)
 

@@ -1,51 +1,87 @@
 # MODIS Volcano Monitor
 
-Dashboard Flask untuk memantau collector data MODIS, data terbaru per gunung, jumlah baris baru, respons HTTP, serta riwayat kegagalan. MySQL, web, dan worker berjalan sebagai container terpisah.
+Aplikasi monitoring MODIS dengan arsitektur terpisah:
 
-Dashboard menampilkan status worker dan hitung mundur pengambilan berikutnya. Jadwal ini
-berasal dari tabel `worker_state`, sehingga tetap akurat ketika halaman browser ditutup
-atau dibuka kembali.
+- `frontend/`: React, Vite, Tailwind CSS, dan Nginx.
+- `backend/`: Flask API, worker collector, Matplotlib, dan Scikit-learn.
+- `database/`: image MySQL, skema, dan snapshot data awal.
 
-## Menjalankan
+## Menjalankan lokal
 
 ```bash
-docker compose up --build -d
+docker compose up --build -d --remove-orphans
 docker compose ps
 ```
 
-Buka `http://localhost:5050`. Dashboard diperbarui otomatis setiap 30 detik. Status JSON tersedia di `http://localhost:5050/api/status` dan health check di `/health`.
+Buka layanan berikut:
 
-Halaman estimasi volume lava tersedia di `http://localhost:5050/lava-volume`.
+- Dashboard React: `http://localhost:5050`
+- Adminer: `http://localhost:8081`
+- Health check backend melalui frontend: `http://localhost:5050/health`
 
-Status worker dalam format JSON tersedia di `http://localhost:5050/api/worker-status`.
+Frontend meneruskan request `/api`, `/charts`, dan `/health` ke backend. Worker tetap
+berjalan ketika browser ditutup dan menyimpan hasil pengambilan ke MySQL sesuai
+`FETCH_INTERVAL_MINUTES`.
 
-Database dapat dibuka melalui Adminer di `http://localhost:8081` dengan server `db`, pengguna dan password sesuai `.env`, serta database `db_modis_pvmbg`.
-
-Pantau log collector:
+Pantau worker:
 
 ```bash
 docker compose logs -f worker
 ```
 
-Ubah password, interval, port, tanggal awal, atau URL sumber di `.env`. Untuk produksi, wajib ganti seluruh password bawaan.
-
-## Menjalankan satu kali
+Jalankan collector satu kali:
 
 ```bash
 docker compose run --rm worker python update_modis.py
 ```
 
-MySQL disimpan pada volume `modis_db`, sehingga data tetap ada saat container direstart.
+## Development tanpa Docker
 
-Pada database/volume baru, image dari `Dockerfile.mysql` menjalankan
-`db_modis_pvmbg_railway.sql` untuk membuat struktur sekaligus mengisi snapshot data.
-Entrypoint MySQL hanya menjalankan dump ini ketika direktori data masih kosong.
+Jalankan Flask pada port 5000, kemudian jalankan Vite pada port 5173. Konfigurasi Vite
+otomatis meneruskan request API ke Flask.
+
+```bash
+cd backend
+python -m pip install -r requirements.txt
+flask --app app run --port 5000
+```
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
 ## Railway
 
-Import `docker-compose.yml` ke project Railway. Railway membuat setiap entri Compose
-sebagai service terpisah. Pastikan service `db` memakai `Dockerfile.mysql` dan mempunyai
-volume pada `/var/lib/mysql`. Snapshot awal akan masuk otomatis pada deployment database
-pertama. Set variabel aplikasi `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, dan
-`DB_NAME` memakai reference variables dari service MySQL. Generate domain publik hanya
-untuk service `web`; service database dan worker tidak memerlukan domain publik.
+Buat tiga service dari repository yang sama:
+
+1. **backend** memakai Dockerfile `backend/Dockerfile`.
+2. **worker** memakai Dockerfile `backend/Dockerfile` dengan Start Command
+   `python worker.py`.
+3. **frontend** memakai Dockerfile `frontend/Dockerfile` dan menjadi satu-satunya
+   service yang diberi public domain.
+
+Backend dan worker memakai reference variables dari service MySQL:
+
+```text
+DB_HOST=mysql.railway.internal
+DB_PORT=3306
+DB_NAME=railway
+DB_USER=root
+DB_PASSWORD=<reference MYSQLPASSWORD>
+FETCH_INTERVAL_MINUTES=2
+TZ=Asia/Jakarta
+```
+
+Frontend membutuhkan runtime variable berikut. Sesuaikan `backend` dengan nama service
+backend di Railway:
+
+```text
+BACKEND_URL=http://backend.railway.internal:5000
+```
+
+Jangan membuat variable `PORT` secara manual pada frontend; Railway menyediakannya
+otomatis. Backend memakai port internal tetap `5000` (`BACKEND_PORT` hanya diperlukan
+jika memang ingin diganti). Snapshot `database/railway_seed.sql` dipakai hanya jika
+database masih kosong; database yang sudah berisi tabel tidak akan ditimpa.

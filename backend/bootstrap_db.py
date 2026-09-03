@@ -4,7 +4,24 @@ from pathlib import Path
 from connect_db import get_connection
 from schema import ensure_schema
 
-DUMP_FILE = Path(__file__).with_name("db_modis_pvmbg_railway.sql")
+SQL_FILES = (
+    Path(__file__).with_name("init.sql"),
+    Path(__file__).with_name("railway_seed.sql"),
+)
+
+
+def execute_sql_file(cursor, sql_file):
+    """Jalankan dump SQL per statement agar kompatibel dengan mysql-connector."""
+    statement = []
+    for line in sql_file.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("--"):
+            continue
+        statement.append(line)
+        if line.rstrip().endswith(";"):
+            cursor.execute("\n".join(statement))
+            if cursor.with_rows:
+                cursor.fetchall()
+            statement = []
 
 def bootstrap_database(retries=12, delay=5):
     """Isi database kosong satu kali; aman dipanggil web dan worker bersamaan."""
@@ -20,17 +37,8 @@ def bootstrap_database(retries=12, delay=5):
                     cursor.execute("""SELECT COUNT(*) FROM information_schema.tables
                         WHERE table_schema=DATABASE() AND table_name='volcanoes'""")
                     if cursor.fetchone()[0] == 0:
-                        script = DUMP_FILE.read_text(encoding="utf-8")
-                        statement = []
-                        for line in script.splitlines():
-                            if not line.strip() or line.lstrip().startswith("--"):
-                                continue
-                            statement.append(line)
-                            if line.rstrip().endswith(";"):
-                                cursor.execute("\n".join(statement))
-                                if cursor.with_rows:
-                                    cursor.fetchall()
-                                statement = []
+                        for sql_file in SQL_FILES:
+                            execute_sql_file(cursor, sql_file)
                         db.commit()
                         print("[BOOTSTRAP] Struktur dan snapshot database berhasil dimuat.", flush=True)
                     else:

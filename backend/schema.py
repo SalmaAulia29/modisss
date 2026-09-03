@@ -1,4 +1,4 @@
-"""Migrasi skema idempoten untuk database baru maupun database yang sudah berjalan."""
+"""Migrasi skema idempoten untuk database baru maupun yang sudah berjalan."""
 
 from connect_db import get_connection
 

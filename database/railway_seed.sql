@@ -1,3 +1,4 @@
+-- Snapshot awal MODIS untuk bootstrap aplikasi/Railway.
 -- MySQL dump 10.13  Distrib 8.4.11, for Linux (x86_64)
 --
 -- Host: localhost    Database: db_modis_pvmbg

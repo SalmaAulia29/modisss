@@ -1,4 +1,7 @@
+# Backend API
 Flask==3.1.2
 gunicorn==23.0.0
 mysql-connector-python==9.4.0
 requests==2.32.5
+matplotlib==3.10.6
+scikit-learn==1.7.1
