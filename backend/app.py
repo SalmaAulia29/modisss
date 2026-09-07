@@ -89,7 +89,7 @@ def get_chart_data(volcanoes):
         )
         energy = fetch_all(
             """
-            SELECT observation_datetime, effusion_cold, effusion_hot
+            SELECT observation_datetime, cumulative_cold, cumulative_hot
             FROM lava_volume_calculations
             WHERE volcano_id = %s
             ORDER BY observation_datetime
@@ -97,8 +97,8 @@ def get_chart_data(volcanoes):
             (volcano_id,),
         )
         for row in energy:
-            cold = float(row["effusion_cold"])
-            hot = float(row["effusion_hot"])
+            cold = float(row["cumulative_cold"])
+            hot = float(row["cumulative_hot"])
             row["mean_e"] = (cold + hot) / 2
             row["envelope"] = [min(cold, hot), max(cold, hot)]
         series[str(volcano_id)] = {"daily": daily, "energy": energy}
@@ -232,7 +232,7 @@ def energy_chart_png(volcano_id):
         return {"error": "Gunung tidak ditemukan"}, 404
     rows = fetch_all(
         """
-        SELECT observation_datetime, effusion_cold, effusion_hot
+        SELECT observation_datetime, cumulative_cold, cumulative_hot
         FROM lava_volume_calculations
         WHERE volcano_id = %s
         ORDER BY observation_datetime

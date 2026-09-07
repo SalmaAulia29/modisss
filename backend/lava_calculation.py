@@ -15,18 +15,27 @@ def recalculate_lava_volumes():
         groups = read.fetchall()
         # Reset hasil turunan dan nomor ID; sumber modis_data tidak diubah.
         write.execute("TRUNCATE TABLE lava_volume_calculations")
-        previous, cumulative = {}, {}
+        previous_time, previous_estimates, cumulative = {}, {}, {}
         values = []
         for row in groups:
             volcano_id, observed = row["volcano_id"], row["observation_datetime"]
-            delta = max(0, int((observed - previous[volcano_id]).total_seconds())) if volcano_id in previous else 0
+            delta = max(0, int((observed - previous_time[volcano_id]).total_seconds())) if volcano_id in previous_time else 0
             sum_b21 = float(row["sum_b21"])
-            estimate = calculate_lava_estimate(sum_b21, delta)
+            previous_estimate = previous_estimates.get(volcano_id)
+            estimate = calculate_lava_estimate(
+                sum_b21,
+                delta,
+                previous_estimate,
+            )
             cold_total, hot_total = cumulative.get(volcano_id, (0.0, 0.0))
+            if previous_estimate is None:
+                cold_total = estimate.effusion_cold
+                hot_total = estimate.effusion_hot
             cold_total += estimate.volume_cold
             hot_total += estimate.volume_hot
             cumulative[volcano_id] = (cold_total, hot_total)
-            previous[volcano_id] = observed
+            previous_time[volcano_id] = observed
+            previous_estimates[volcano_id] = (estimate.effusion_cold, estimate.effusion_hot)
             values.append((volcano_id, observed, row["pixel_count"], sum_b21, row["max_b21"], delta,
                            estimate.effusion_cold, estimate.effusion_hot,
                            estimate.heat_flux_cold, estimate.heat_flux_hot,
@@ -34,7 +43,8 @@ def recalculate_lava_volumes():
         if values:
             write.executemany("""INSERT INTO lava_volume_calculations
               (volcano_id,observation_datetime,pixel_count,sum_b21,max_b21,delta_seconds,
-               effusion_cold,effusion_hot,heat_flux_cold,heat_flux_hot,volume_cold,volume_hot,cumulative_cold,cumulative_hot)
+               effusion_cold,effusion_hot,heat_flux_cold,heat_flux_hot,volume_cold,volume_hot,
+               cumulative_cold,cumulative_hot)
               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", values)
         db.commit()
         read.close()

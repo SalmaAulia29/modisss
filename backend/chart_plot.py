@@ -1,4 +1,4 @@
-"""Pembuatan grafik API MODIS menggunakan Matplotlib dan scikit-learn."""
+"""Pembuatan grafik API MODIS menggunakan Matplotlib."""
 
 from io import BytesIO
 
@@ -9,7 +9,6 @@ matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import numpy as np
 from matplotlib.figure import Figure
-from sklearn.linear_model import LinearRegression
 
 BACKGROUND = "#ffffff"
 GRID = "#c7cdd4"
@@ -18,7 +17,6 @@ MUTED = "#4b5563"
 COLD = "#3498db"
 HOT = "#ff7f0e"
 MEAN = "#202938"
-TREND = "#6f42c1"
 
 
 def _figure(title, y_label):
@@ -52,15 +50,15 @@ def _png_response(figure):
 
 
 def energy_time_series(rows, volcano_name):
-    """Plot MeanE, amplop Ecold/Ehot, dan tren linear MeanE."""
-    figure, axis = _figure(f"Scatter / Time Series MeanE · {volcano_name}", "Nilai E (m³/s)")
+    """Plot MeanE blok ketiga dengan envelope Ecold dan Ehot."""
+    figure, axis = _figure(f"Scatter / Time Series MeanE · {volcano_name}", "Nilai E kumulatif (m³)")
     if not rows:
         axis.text(0.5, 0.5, "Belum ada data", color=MUTED, ha="center", va="center", transform=axis.transAxes)
         return _png_response(figure)
 
     dates = [row["observation_datetime"] for row in rows]
-    cold = np.asarray([float(row["effusion_cold"]) for row in rows])
-    hot = np.asarray([float(row["effusion_hot"]) for row in rows])
+    cold = np.asarray([float(row["cumulative_cold"]) for row in rows])
+    hot = np.asarray([float(row["cumulative_hot"]) for row in rows])
     mean = (cold + hot) / 2
     lower, upper = np.minimum(cold, hot), np.maximum(cold, hot)
 
@@ -68,12 +66,6 @@ def energy_time_series(rows, volcano_name):
     axis.plot(dates, cold, color=COLD, linewidth=1.8, label="Ecold")
     axis.plot(dates, hot, color=HOT, linewidth=1.8, label="Ehot")
     axis.scatter(dates, mean, color=MEAN, edgecolors=BACKGROUND, linewidths=0.7, s=30, zorder=4, label="MeanE")
-
-    if len(dates) >= 2:
-        elapsed_days = np.asarray([(value - dates[0]).total_seconds() / 86400 for value in dates]).reshape(-1, 1)
-        model = LinearRegression().fit(elapsed_days, mean)
-        trend = model.predict(elapsed_days)
-        axis.plot(dates, trend, color=TREND, linestyle="--", linewidth=1.5, label="Tren MeanE")
 
     axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=7))
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m-%Y"))
