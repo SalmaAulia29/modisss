@@ -33,6 +33,20 @@ const LAVA_COLUMNS = [
 ];
 
 const number = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
+const today = new Date().toISOString().slice(0, 10);
+
+function downloadCsv(filename, columns, rows) {
+  const escape = (value) => `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
+  const content = [
+    columns.map(([label]) => escape(label)).join(","),
+    ...rows.map((row) => columns.map(([, key]) => escape(row[key])).join(",")),
+  ].join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
 
 function formatValue(value, key) {
   if (value === null || value === undefined || value === "") return "—";
@@ -72,6 +86,8 @@ function Icon({ name, className = "h-5 w-5" }) {
     alert: <><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.7 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z" /></>,
     arrow: <><path d="M5 12h14M14 7l5 5-5 5" /></>,
     download: <><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></>,
+    menu: <><path d="M4 6h16M4 12h16M4 18h16" /></>,
+    close: <><path d="m6 6 12 12M18 6 6 18" /></>,
   };
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -90,25 +106,25 @@ function StatusBadge({ status }) {
 }
 
 function AppShell({ page, children, systemOnline = true }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const closeMenu = () => setMenuOpen(false);
+
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
-      <aside className="hidden border-r border-line bg-white lg:flex lg:min-h-screen lg:flex-col lg:px-5 lg:py-7">
+    <div className="min-h-screen">
+      {menuOpen && <button type="button" aria-label="Tutup menu" onClick={closeMenu} className="fixed inset-0 z-40 cursor-default bg-slate-950/25 backdrop-blur-[1px]" />}
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col border-r border-line bg-white px-5 py-7 shadow-2xl transition-transform duration-200 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="flex items-center justify-between">
         <a href="/" className="flex items-center gap-3 px-2 text-slate-950">
           <span className="grid h-10 w-10 place-items-center rounded-xl border border-cyan/30 bg-cyan/10 text-cyan"><Icon name="mountain" /></span>
           <span><strong className="block text-sm tracking-wide">MODIS</strong><small className="text-[10px] uppercase tracking-[0.18em] text-muted">Volcano Monitor</small></span>
         </a>
-        <nav className="mt-10 space-y-1 text-sm">
-          <SideLink active={page === "dashboard"} href="/" icon="activity">Monitoring</SideLink>
-          <SideLink active={page === "lava"} href="/lava-volume" icon="chart">Analisis Lava</SideLink>
-        </nav>
-        <div className="mt-8 border-t border-line pt-6">
-          <p className="px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Akses cepat</p>
-          <div className="mt-3 space-y-1 text-xs text-muted">
-            <a className="block rounded-lg px-3 py-2 hover:bg-card hover:text-slate-950" href="/#volcanoes">Status gunung</a>
-            <a className="block rounded-lg px-3 py-2 hover:bg-card hover:text-slate-950" href="/#data-modis">Data MODIS</a>
-            <a className="block rounded-lg px-3 py-2 hover:bg-card hover:text-slate-950" href="/#history">Riwayat collector</a>
-          </div>
+          <button type="button" aria-label="Tutup menu" onClick={closeMenu} className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-card hover:text-slate-950"><Icon name="close" className="h-5 w-5" /></button>
         </div>
+        <nav className="mt-10 space-y-1 text-sm">
+          <SideLink active={page === "dashboard"} href="/" icon="activity" onClick={closeMenu}>Dashboard</SideLink>
+          <SideLink active={page === "monitoring"} href="/monitoring" icon="clock" onClick={closeMenu}>Monitoring</SideLink>
+        </nav>
         <div className="mt-auto rounded-xl border border-line bg-panel p-4">
           <div className="flex items-center gap-2 text-xs text-slate-700"><span className={`h-2 w-2 rounded-full ${systemOnline ? "bg-emerald-500" : "bg-danger"}`} />{systemOnline ? "Sistem terhubung" : "Sistem terganggu"}</div>
           <p className="mt-2 text-[10px] leading-4 text-muted">Collector berjalan terpisah dan tetap aktif saat browser ditutup.</p>
@@ -116,9 +132,9 @@ function AppShell({ page, children, systemOnline = true }) {
       </aside>
 
       <div className="min-w-0">
-        <header className="flex h-16 items-center justify-between border-b border-line bg-white px-4 lg:hidden">
-          <a href="/" className="flex items-center gap-2 font-semibold text-slate-950"><span className="text-cyan"><Icon name="mountain" /></span>MODIS Monitor</a>
-          <div className="flex gap-1 rounded-lg border border-line bg-panel p-1 text-xs"><a className={`rounded-md px-3 py-1.5 ${page === "dashboard" ? "bg-card text-slate-950" : "text-muted"}`} href="/">Monitor</a><a className={`rounded-md px-3 py-1.5 ${page === "lava" ? "bg-card text-slate-950" : "text-muted"}`} href="/lava-volume">Lava</a></div>
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-line bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-9">
+          <div className="flex items-center gap-3"><button type="button" aria-label="Buka menu" onClick={() => setMenuOpen(true)} className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-panel text-slate-700 transition-colors hover:border-cyan/40 hover:text-cyan"><Icon name="menu" /></button><a href="/" className="flex items-center gap-2 font-semibold text-slate-950"><span className="text-cyan"><Icon name="mountain" /></span><span className="hidden sm:inline">MODIS Monitor</span><span className="sm:hidden">MODIS</span></a></div>
+          <div className="hidden items-center gap-3 text-xs sm:flex"><span className="text-muted">{page === "dashboard" ? "Dashboard" : page === "monitoring" ? "Monitoring" : "Perhitungan Effusion Rate Lava"}</span><span className={`h-2 w-2 rounded-full ${systemOnline ? "bg-emerald-500" : "bg-danger"}`} /></div>
         </header>
         <main className="mx-auto max-w-[1540px] px-4 py-7 sm:px-6 lg:px-9 lg:py-9">
           {children}
@@ -129,8 +145,8 @@ function AppShell({ page, children, systemOnline = true }) {
   );
 }
 
-function SideLink({ active, href, icon, children }) {
-  return <a href={href} className={`flex items-center gap-3 rounded-xl px-3 py-3 transition-colors ${active ? "border border-cyan/20 bg-cyan/10 text-cyan" : "border border-transparent text-muted hover:bg-card hover:text-slate-950"}`}><Icon name={icon} className="h-4 w-4" /><span>{children}</span></a>;
+function SideLink({ active, href, icon, children, onClick }) {
+  return <a href={href} onClick={onClick} className={`flex items-center gap-3 rounded-xl px-3 py-3 transition-colors ${active ? "border border-cyan/20 bg-cyan/10 text-cyan" : "border border-transparent text-muted hover:bg-card hover:text-slate-950"}`}><Icon name={icon} className="h-4 w-4" /><span>{children}</span></a>;
 }
 
 function PageHeading({ eyebrow, title, description, generatedAt, refreshing, onRefresh }) {
@@ -264,18 +280,15 @@ function compactNumber(value) {
   return new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
-function ChartPanel({ volcano, type, rows }) {
-  const isVolume = type === "daily";
+function ChartPanel({ volcano, rows }) {
   const data = rows || [];
-  const downloadUrl = isVolume
-    ? `/charts/daily-volume/${volcano.id}.png?download=1`
-    : `/charts/energy/${volcano.id}.png?download=1`;
+  const downloadUrl = `/charts/energy/${volcano.id}.png?download=1`;
 
   return (
     <article className="surface overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
         <div>
-          <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-cyan" /><h3 className="text-sm font-semibold text-slate-950">{isVolume ? "Volume lava harian" : "Mean Energy"}</h3></div>
+          <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-cyan" /><h3 className="text-sm font-semibold text-slate-950">Grafik Estimasi Effusion Rate Lava</h3></div>
           <p className="mt-1 pl-3.5 text-[10px] uppercase tracking-[0.12em] text-muted">{volcano.name} · {data.length} titik data</p>
         </div>
         <a href={downloadUrl} download className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-700 transition-colors hover:border-cyan/40 hover:text-cyan" title="Unduh grafik hasil Matplotlib dan Scikit-learn"><Icon name="download" className="h-3.5 w-3.5" />Unduh PNG</a>
@@ -285,23 +298,14 @@ function ChartPanel({ volcano, type, rows }) {
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 4 }}>
               <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
-              <XAxis dataKey={isVolume ? "observation_date" : "observation_datetime"} tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} />
+              <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} />
               <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={48} />
-              <Tooltip contentStyle={chartTheme.tooltip} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} labelFormatter={(label) => new Date(label).toLocaleString("id-ID", isVolume ? { dateStyle: "long" } : { dateStyle: "medium", timeStyle: "short" })} formatter={(value, name) => [Array.isArray(value) ? `${number.format(value[0])} – ${number.format(value[1])}` : number.format(value), name]} />
+              <Tooltip contentStyle={chartTheme.tooltip} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} labelFormatter={(label) => new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })} formatter={(value, name) => [number.format(value), name]} />
               <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
-              {isVolume ? (
-                <>
-                  <Area type="monotone" dataKey="volume_cold" name="Cold (m³)" stroke={chartTheme.cold} fill={chartTheme.cold} fillOpacity={0.08} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: chartTheme.cold, stroke: "#ffffff", strokeWidth: 2 }} />
-                  <Area type="monotone" dataKey="volume_hot" name="Hot (m³)" stroke={chartTheme.hot} fill={chartTheme.hot} fillOpacity={0.06} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: chartTheme.hot, stroke: "#ffffff", strokeWidth: 2 }} />
-                </>
-              ) : (
-                <>
-                  <Area type="monotone" dataKey="envelope" name="Rentang E" stroke="none" fill={chartTheme.cold} fillOpacity={0.08} activeDot={false} />
-                  <Line type="monotone" dataKey="cumulative_cold" name="Ecold" stroke={chartTheme.cold} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="cumulative_hot" name="Ehot" stroke={chartTheme.hot} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
-                  <Scatter dataKey="mean_e" name="MeanE" fill={chartTheme.mean} line={false} shape="circle" />
-                </>
-              )}
+              <Area type="monotone" dataKey="envelope" name="Rentang E" stroke="none" fill={chartTheme.cold} fillOpacity={0.08} activeDot={false} />
+              <Line type="monotone" dataKey="cumulative_cold" name="Ecold" stroke={chartTheme.cold} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
+              <Line type="monotone" dataKey="cumulative_hot" name="Ehot" stroke={chartTheme.hot} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
+              <Scatter dataKey="mean_e" name="MeanE" fill={chartTheme.mean} line={false} shape="circle" />
             </ComposedChart>
           </ResponsiveContainer>
         ) : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
@@ -310,69 +314,169 @@ function ChartPanel({ volcano, type, rows }) {
   );
 }
 
-function Charts({ volcanoes, chartData, dashboard = false }) {
+function AnalysisFilters({ volcanoes, values, onChange }) {
   return (
-    <section className="mt-10">
-      <SectionTitle index={dashboard ? "04" : "02"} title="Analisis visual interaktif" subtitle="Arahkan kursor ke grafik untuk melihat nilai tiap observasi" action={dashboard && <a href="/lava-volume" className="inline-flex items-center gap-2 text-xs font-semibold text-cyan hover:text-slate-950">Lihat perhitungan lengkap <Icon name="arrow" className="h-3.5 w-3.5" /></a>} />
-      <div className="grid gap-4 xl:grid-cols-2">{volcanoes.map((volcano) => <div className="grid gap-4" key={volcano.id}><ChartPanel volcano={volcano} type="daily" rows={chartData?.[String(volcano.id)]?.daily} /><ChartPanel volcano={volcano} type="energy" rows={chartData?.[String(volcano.id)]?.energy} /></div>)}</div>
+    <section className="surface mb-6 grid gap-4 p-5 md:grid-cols-[1.2fr_1fr_1fr] md:items-end">
+      <label className="text-xs font-semibold text-slate-700">
+        Pilih gunung
+        <select value={values.volcano} onChange={(event) => onChange("volcano", event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan">
+          <option value="all">Semua gunung</option>
+          {volcanoes.map((volcano) => <option value={String(volcano.id)} key={volcano.id}>{volcano.name}</option>)}
+        </select>
+      </label>
+      <label className="text-xs font-semibold text-slate-700">
+        Mulai tanggal
+        <input type="date" min="2026-01-01" value={values.startDate} onChange={(event) => onChange("startDate", event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan" />
+      </label>
+      <label className="text-xs font-semibold text-slate-700">
+        Sampai tanggal
+        <input type="date" min={values.startDate || "2026-01-01"} value={values.endDate} onChange={(event) => onChange("endDate", event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan" />
+      </label>
     </section>
   );
 }
 
+function Charts({ volcanoes, chartData, dashboard = false, filters }) {
+  const activeFilters = filters || { volcano: "all", startDate: "", endDate: "" };
+  const visibleVolcanoes = activeFilters.volcano === "all" ? volcanoes : volcanoes.filter((volcano) => String(volcano.id) === activeFilters.volcano);
+  const isAfterStart = (row) => !activeFilters.startDate || String(row.observation_datetime).slice(0, 10) >= activeFilters.startDate;
+  const isBeforeEnd = (row) => !activeFilters.endDate || String(row.observation_datetime).slice(0, 10) <= activeFilters.endDate;
+  return (
+    <section className="mt-10">
+      <SectionTitle index={dashboard ? "04" : "02"} title="Grafik Estimasi Effusion Rate Lava" subtitle="Arahkan kursor ke grafik untuk melihat nilai tiap observasi" action={dashboard && <a href="/lava-volume" className="inline-flex items-center gap-2 text-xs font-semibold text-cyan hover:text-slate-950">Lihat perhitungan <Icon name="arrow" className="h-3.5 w-3.5" /></a>} />
+      <div className="grid gap-4 xl:grid-cols-2">{visibleVolcanoes.map((volcano) => <ChartPanel volcano={volcano} type="energy" rows={chartData?.[String(volcano.id)]?.energy?.filter((row) => isAfterStart(row) && isBeforeEnd(row))} key={volcano.id} />)}</div>
+    </section>
+  );
+}
+
+function DashboardFilter({ volcanoes, values, onChange, onSubmit }) {
+  return (
+    <form onSubmit={onSubmit} className="relative z-10 -mt-8 mx-4 grid gap-4 rounded-2xl border border-white/70 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.13)] sm:mx-8 sm:grid-cols-[1.2fr_1fr_1fr_auto] sm:items-end lg:mx-14 lg:p-5">
+      <label className="text-xs font-semibold text-slate-700">
+        Gunung
+        <select value={values.volcano} onChange={(event) => onChange("volcano", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan">
+          <option value="all">Semua gunung</option>
+          {volcanoes.map((volcano) => <option value={String(volcano.id)} key={volcano.id}>{volcano.name}</option>)}
+        </select>
+      </label>
+      <label className="text-xs font-semibold text-slate-700">
+        Mulai periode
+        <input type="date" min="2026-01-01" max={today} value={values.startDate} onChange={(event) => onChange("startDate", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan" />
+      </label>
+      <label className="text-xs font-semibold text-slate-700">
+        Sampai
+        <input type="date" min={values.startDate || "2026-01-01"} max={today} value={values.endDate} onChange={(event) => onChange("endDate", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan" />
+      </label>
+      <button type="submit" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-cyan px-5 text-xs font-bold text-white transition-colors hover:bg-slate-950"><Icon name="arrow" className="h-4 w-4 rotate-90" />Tampilkan data</button>
+    </form>
+  );
+}
+
+function ActionCard({ icon, title, description, onClick, href, disabled = false }) {
+  const content = <><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-cyan/10 text-cyan"><Icon name={icon} className="h-5 w-5" /></span><span className="min-w-0"><strong className="block text-sm text-slate-950">{title}</strong><small className="mt-1 block leading-5 text-muted">{description}</small></span><Icon name="arrow" className="ml-auto h-4 w-4 shrink-0 text-slate-400" /></>;
+  if (href) return <a href={href} className="flex items-start gap-3 rounded-xl border border-line bg-white p-4 text-left transition-colors hover:border-cyan/40 hover:bg-cyan/[0.03]">{content}</a>;
+  return <button type="button" onClick={onClick} disabled={disabled} className="flex items-start gap-3 rounded-xl border border-line bg-white p-4 text-left transition-colors hover:border-cyan/40 hover:bg-cyan/[0.03] disabled:cursor-not-allowed disabled:opacity-50">{content}</button>;
+}
+
 function Dashboard() {
   const { data, error, loading, refreshing, load } = useApi("/api/dashboard");
+  const [filters, setFilters] = useState({ volcano: "all", startDate: "2026-01-01", endDate: today });
+  const [appliedFilters, setAppliedFilters] = useState(null);
+  const [activePanel, setActivePanel] = useState("");
   if (loading && !data) return <AppShell page="dashboard"><Loading /></AppShell>;
   if (error && !data) return <AppShell page="dashboard" systemOnline={false}><ErrorPanel message={error} retry={load} /></AppShell>;
   const online = !["error", "failed"].includes(data.worker?.status);
+  const selectedRows = appliedFilters ? data.modis_data.filter((row) => {
+    const rowDate = String(row.datetime).slice(0, 10);
+    return (appliedFilters.volcano === "all" || String(data.volcanoes.find((volcano) => volcano.name === row.volcano_name)?.id) === appliedFilters.volcano) && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
+  }) : [];
+  const applyFilters = (event) => {
+    event.preventDefault();
+    setAppliedFilters(filters);
+    setActivePanel("");
+  };
+  const saveModis = () => downloadCsv(`data-modis-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, MODIS_COLUMNS, selectedRows);
+  const saveCalculations = async () => {
+    const response = await fetch("/api/lava-volume");
+    const payload = await response.json();
+    const rows = (payload.calculations || []).filter((row) => {
+      const rowDate = String(row.observation_datetime).slice(0, 10);
+      return (appliedFilters.volcano === "all" || String(row.volcano_id) === appliedFilters.volcano) && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
+    });
+    downloadCsv(`perhitungan-mean-e-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, LAVA_COLUMNS, rows);
+  };
+  const calculationUrl = appliedFilters ? (() => {
+    const params = new URLSearchParams({ start: appliedFilters.startDate, end: appliedFilters.endDate });
+    if (appliedFilters.volcano !== "all") params.set("volcano", appliedFilters.volcano);
+    return `/lava-volume?${params.toString()}#detail-perhitungan`;
+  })() : "/lava-volume";
   return (
     <AppShell page="dashboard" systemOnline={online}>
-      <PageHeading eyebrow="Operational dashboard" title="Monitoring pengambilan data" description="Pastikan collector terhubung, pengecekan berlangsung, dan observasi MODIS baru tersimpan ke database." generatedAt={data.generated_at} refreshing={refreshing} onRefresh={load} />
+      <section className="relative overflow-hidden rounded-[1.5rem] bg-[#102d35] px-6 py-10 text-white shadow-[0_20px_50px_rgba(16,45,53,0.2)] sm:px-10 lg:px-14 lg:py-14">
+        <div className="relative z-10 max-w-2xl"><p className="mb-3 text-[10px] font-bold uppercase tracking-[0.24em] text-[#8dd6c8]">PVMBG · MODIS monitoring</p><h1 className="max-w-xl text-3xl font-semibold tracking-tight sm:text-5xl">Pantau aktivitas gunung dalam satu layar.</h1><p className="mt-4 max-w-lg text-sm leading-6 text-white/70">Pilih gunung dan periode pengamatan untuk melihat estimasi effusion rate lava dari data MODIS yang masuk.</p></div>
+        <div className="pointer-events-none absolute -right-8 -bottom-12 text-[#1b525b]/80 sm:right-8"><Icon name="mountain" className="h-56 w-56 sm:h-72 sm:w-72" /></div>
+        <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full border border-white/10" />
+      </section>
+      <DashboardFilter volcanoes={data.volcanoes} values={filters} onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} onSubmit={applyFilters} />
+      {appliedFilters && <>
+        <section id="mean-e" className="mt-10 scroll-mt-6"><SectionTitle title="Hasil pengamatan" subtitle={`${appliedFilters.startDate} sampai ${appliedFilters.endDate} · tekan Enter atau Tampilkan data untuk memperbarui`} action={<span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">● Data terhubung</span>} /><Charts volcanoes={data.volcanoes} chartData={data.chart_data} filters={appliedFilters} /></section>
+        <section className="mt-10"><SectionTitle title="Akses data" subtitle="Buka data pendukung sesuai kebutuhan analisis" /><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><ActionCard icon="database" title="Lihat data MODIS" description={`${selectedRows.length} baris pada periode terpilih`} onClick={() => setActivePanel(activePanel === "modis" ? "" : "modis")} /><ActionCard icon="download" title="Simpan data MODIS" description="Unduh data mentah sebagai CSV" onClick={saveModis} /><ActionCard icon="chart" title="Lihat perhitungan" description="Detail estimasi effusion rate lava" href={calculationUrl} /><ActionCard icon="download" title="Simpan perhitungan" description="Unduh hasil perhitungan sebagai CSV" onClick={saveCalculations} /></div></section>
+        {activePanel === "modis" && <section id="data-modis" className="mt-6 scroll-mt-6"><SectionTitle title="Data mentah MODIS" subtitle={`${selectedRows.length} data sesuai filter`} /><DataTable columns={MODIS_COLUMNS} rows={selectedRows} empty="Belum ada data MODIS pada periode ini." /></section>}
+      </>}
+    </AppShell>
+  );
+}
+
+function Monitoring() {
+  const { data, error, loading, refreshing, load } = useApi("/api/dashboard");
+  if (loading && !data) return <AppShell page="monitoring"><Loading /></AppShell>;
+  if (error && !data) return <AppShell page="monitoring" systemOnline={false}><ErrorPanel message={error} retry={load} /></AppShell>;
+  const online = !["error", "failed"].includes(data.worker?.status);
+  return (
+    <AppShell page="monitoring" systemOnline={online}>
+      <PageHeading eyebrow="Operational monitoring" title="Monitoring data masuk" description="Pantau collector, status tiap gunung, dan riwayat pengambilan data MODIS." generatedAt={data.generated_at} refreshing={refreshing} onRefresh={load} />
       <Countdown worker={data.worker} />
       {data.worker?.last_error && <div className="mb-4 flex gap-3 rounded-xl border border-danger/30 bg-danger/10 p-4 text-sm text-danger"><Icon name="alert" className="h-5 w-5 shrink-0" /><div><strong>Kesalahan worker</strong><p className="mt-1 opacity-80">{data.worker.last_error}</p></div></div>}
-
-      <section className="mt-6">
-        <SectionTitle index="01" title="Ringkasan database" subtitle="Angka langsung dari proses collector dan tabel MODIS" />
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 lg:grid-rows-2"><MetricCard featured icon="database" label="Total data MODIS" value={data.totals.total_data} tone="text-cyan" /><MetricCard icon="activity" label="Total pengambilan" value={data.totals.total_runs} /><MetricCard icon="check" label="Proses berhasil" value={data.totals.success_runs} tone="text-emerald-700" /><MetricCard icon="database" label="Baris baru" value={data.totals.inserted} /><MetricCard icon="alert" label="Proses gagal" value={data.totals.failed_runs} tone={data.totals.failed_runs ? "text-danger" : "text-slate-950"} /></div>
-      </section>
-
-      <section id="volcanoes" className="mt-10 scroll-mt-6">
-        <SectionTitle index="02" title="Status per gunung" subtitle="Hasil pengecekan terbaru dan jumlah data yang benar-benar masuk" />
-        <div className="grid gap-4 xl:grid-cols-2">{data.volcanoes.map((volcano) => <VolcanoStatus volcano={volcano} key={volcano.id} />)}</div>
-      </section>
-
-      <section id="history" className="mt-10 scroll-mt-6">
-        <SectionTitle index="03" title="Riwayat collector" subtitle={`${data.runs.length} proses terbaru · kolom Baru menunjukkan data yang masuk ke database`} />
-        <RunsTable rows={data.runs} />
-      </section>
-
-      <Charts volcanoes={data.volcanoes} chartData={data.chart_data} dashboard />
-
-      <section id="data-modis" className="mt-10 scroll-mt-6">
-        <SectionTitle index="05" title="Data mentah MODIS" subtitle={`${data.modis_data.length} data terbaru · ID ditampilkan dari kecil ke besar`} />
-        <DataTable columns={MODIS_COLUMNS} rows={data.modis_data} empty="Belum ada data MODIS tersimpan." />
-      </section>
+      <section className="mt-8"><SectionTitle title="Status per gunung" subtitle="Pengecekan terakhir dari collector" /><div className="grid gap-4 xl:grid-cols-2">{data.volcanoes.map((volcano) => <VolcanoStatus volcano={volcano} key={volcano.id} />)}</div></section>
+      <section className="mt-10"><SectionTitle title="Riwayat collector" subtitle={`${data.runs.length} proses terbaru · kolom Baru menunjukkan data yang masuk`} /><RunsTable rows={data.runs} /></section>
     </AppShell>
   );
 }
 
 function LavaVolume() {
   const { data, error, loading, refreshing, load } = useApi("/api/lava-volume", 60);
+  const query = new URLSearchParams(window.location.search);
+  const [filters, setFilters] = useState({ volcano: query.get("volcano") || "all", startDate: query.get("start") || "2026-01-01", endDate: query.get("end") || "" });
+  useEffect(() => {
+    if (data && window.location.hash === "#detail-perhitungan") {
+      document.getElementById("detail-perhitungan")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [data]);
   if (loading && !data) return <AppShell page="lava"><Loading /></AppShell>;
   if (error && !data) return <AppShell page="lava" systemOnline={false}><ErrorPanel message={error} retry={load} /></AppShell>;
+  const isInPeriod = (row) => {
+    const rowDate = String(row.observation_datetime).slice(0, 10);
+    return rowDate >= filters.startDate && (!filters.endDate || rowDate <= filters.endDate);
+  };
+  const filteredSummary = filters.volcano === "all" ? data.summary : data.summary.filter((item) => String(item.id) === filters.volcano);
+  const filteredCalculations = data.calculations.filter((row) => (filters.volcano === "all" || String(row.volcano_id) === filters.volcano) && isInPeriod(row));
   return (
     <AppShell page="lava">
-      <PageHeading eyebrow="Thermal analysis" title="Estimasi volume lava" description="Hasil integrasi laju volume berdasarkan radiansi termal MODIS Band 21." refreshing={refreshing} onRefresh={load} />
+      <PageHeading eyebrow="Thermal analysis" title="Perhitungan Effusion Rate Lava" description="Visualisasi estimasi effusion rate lava berdasarkan data MODIS mulai Januari 2026." refreshing={refreshing} onRefresh={load} />
+      <AnalysisFilters volcanoes={data.summary} values={filters} onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} />
       <section>
         <SectionTitle index="01" title="Volume kumulatif" subtitle="Rentang estimasi cold dan hot untuk setiap gunung" />
-        <div className="grid gap-4 md:grid-cols-2">{data.summary.map((item) => <article className="surface overflow-hidden" key={item.id}><div className="flex items-center justify-between border-b border-line p-5"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-card text-cyan"><Icon name="mountain" className="h-4 w-4" /></span><div><h3 className="font-semibold text-slate-950">{item.name}</h3><p className="text-[11px] text-muted">{item.observations} observasi</p></div></div></div><div className="grid grid-cols-2 divide-x divide-line"><div className="p-5"><p className="text-[10px] uppercase tracking-wider text-muted">Cold</p><strong className="mt-2 block font-mono text-xl text-cyan">{number.format(item.cumulative_cold)}</strong><span className="text-[10px] text-muted">m³ kumulatif</span></div><div className="p-5"><p className="text-[10px] uppercase tracking-wider text-muted">Hot</p><strong className="mt-2 block font-mono text-xl text-amber">{number.format(item.cumulative_hot)}</strong><span className="text-[10px] text-muted">m³ kumulatif</span></div></div></article>)}</div>
+        <div className="grid gap-4 md:grid-cols-2">{filteredSummary.map((item) => <article className="surface overflow-hidden" key={item.id}><div className="flex items-center justify-between border-b border-line p-5"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-card text-cyan"><Icon name="mountain" className="h-4 w-4" /></span><div><h3 className="font-semibold text-slate-950">{item.name}</h3><p className="text-[11px] text-muted">{item.observations} observasi</p></div></div></div><div className="grid grid-cols-2 divide-x divide-line"><div className="p-5"><p className="text-[10px] uppercase tracking-wider text-muted">Cold</p><strong className="mt-2 block font-mono text-xl text-cyan">{number.format(item.cumulative_cold)}</strong><span className="text-[10px] text-muted">m³ kumulatif</span></div><div className="p-5"><p className="text-[10px] uppercase tracking-wider text-muted">Hot</p><strong className="mt-2 block font-mono text-xl text-amber">{number.format(item.cumulative_hot)}</strong><span className="text-[10px] text-muted">m³ kumulatif</span></div></div></article>)}</div>
       </section>
       <section className="surface mt-5 p-5 text-sm leading-7 text-slate-700"><div className="flex items-center gap-2 text-slate-950"><Icon name="chart" className="h-4 w-4 text-cyan" /><h2 className="font-semibold">Metode perhitungan</h2></div><p className="mt-3">ΣB21 dan MAX(B21) dihitung untuk setiap gunung pada waktu pengamatan yang sama.</p><div className="my-3 grid gap-2 font-mono text-xs text-cyan sm:grid-cols-2"><code className="rounded-lg border border-line bg-ink px-3 py-2">Ecold = 0,450 × ΣB21 − 0,127</code><code className="rounded-lg border border-line bg-ink px-3 py-2">Ehot = 0,164 × ΣB21 − 0,045</code></div><p>Integrasi blok ketiga = nilai baris sebelumnya × Δt. MeanE = (Ecold + Ehot) / 2 untuk scatter dan Ecold–Ehot menjadi envelope.</p><p className="mt-2 text-xs text-muted">Qcold = Ecold × {number.format(data.constants.cold_heat_density)} · Qhot = Ehot × {number.format(data.constants.hot_heat_density)}. Observasi pertama menjadi nilai awal kumulatif.</p></section>
-      <Charts volcanoes={data.summary} chartData={data.chart_data} />
-      <section className="mt-10"><SectionTitle index="03" title="Detail perhitungan" subtitle="Urutan observasi terbaru" /><DataTable columns={LAVA_COLUMNS} rows={data.calculations} empty="Belum ada hasil perhitungan." /></section>
+      <Charts volcanoes={filteredSummary} chartData={data.chart_data} filters={filters} />
+      <section id="detail-perhitungan" className="mt-10 scroll-mt-6"><SectionTitle index="03" title="Detail perhitungan" subtitle={`${filteredCalculations.length} baris sesuai gunung dan periode terpilih`} /><DataTable columns={LAVA_COLUMNS} rows={filteredCalculations} empty="Belum ada hasil perhitungan." /></section>
     </AppShell>
   );
 }
 
 export default function App() {
-  return window.location.pathname === "/lava-volume" ? <LavaVolume /> : <Dashboard />;
+  if (window.location.pathname === "/monitoring") return <Monitoring />;
+  if (window.location.pathname === "/lava-volume") return <LavaVolume />;
+  return <Dashboard />;
 }
