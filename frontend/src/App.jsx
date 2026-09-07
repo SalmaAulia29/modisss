@@ -23,13 +23,15 @@ const MODIS_COLUMNS = [
 ];
 
 const LAVA_COLUMNS = [
-  ["ID", "id"], ["Gunung", "volcano_name"], ["Datetime", "observation_datetime"],
-  ["Pixel", "pixel_count"], ["ΣB21", "sum_b21"], ["MAX B21", "max_b21"],
-  ["Δt (detik)", "delta_seconds"], ["E cold (m³/s)", "effusion_cold"],
-  ["E hot (m³/s)", "effusion_hot"], ["Heat cold (W)", "heat_flux_cold"],
-  ["Heat hot (W)", "heat_flux_hot"], ["Volume cold (m³)", "volume_cold"],
-  ["Volume hot (m³)", "volume_hot"], ["Kumulatif cold (m³)", "cumulative_cold"],
-  ["Kumulatif hot (m³)", "cumulative_hot"],
+  ["Time", "observation_datetime"], ["sigmaB21", "sum_b21"], ["Ecold", "effusion_cold"],
+  ["Ehot", "effusion_hot"], ["Qcold", "heat_flux_cold"], ["Qhot", "heat_flux_hot"],
+  ["cumEcold [B1]", "cum_e_cold_block1"], ["cumEhot [B1]", "cum_e_hot_block1"],
+  ["meanE [B1]", "mean_e_block1"], ["cumQcold [B1]", "cum_q_cold_block1"],
+  ["cumQhot [B1]", "cum_q_hot_block1"], ["meanQ [B1]", "mean_q_block1"],
+  ["second", "delta_seconds"], ["cumEcold [B3]", "cumulative_cold"],
+  ["cumEhot [B3]", "cumulative_hot"], ["meanE [B3]", "mean_e_block3"],
+  ["cumQcold [B3]", "cumulative_q_cold"], ["cumQhot [B3]", "cumulative_q_hot"],
+  ["meanQ [B3]", "mean_q"],
 ];
 
 const number = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
@@ -459,18 +461,10 @@ function LavaVolume() {
     const rowDate = String(row.observation_datetime).slice(0, 10);
     return rowDate >= filters.startDate && (!filters.endDate || rowDate <= filters.endDate);
   };
-  const filteredSummary = filters.volcano === "all" ? data.summary : data.summary.filter((item) => String(item.id) === filters.volcano);
   const filteredCalculations = data.calculations.filter((row) => (filters.volcano === "all" || String(row.volcano_id) === filters.volcano) && isInPeriod(row));
   return (
     <AppShell page="lava">
-      <PageHeading eyebrow="Thermal analysis" title="Perhitungan Effusion Rate Lava" description="Visualisasi estimasi effusion rate lava berdasarkan data MODIS mulai Januari 2026." refreshing={refreshing} onRefresh={load} />
-      <AnalysisFilters volcanoes={data.summary} values={filters} onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} />
-      <section>
-        <SectionTitle index="01" title="Volume kumulatif" subtitle="Rentang estimasi cold dan hot untuk setiap gunung" />
-        <div className="grid gap-4 md:grid-cols-2">{filteredSummary.map((item) => <article className="surface overflow-hidden" key={item.id}><div className="flex items-center justify-between border-b border-line p-5"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-card text-cyan"><Icon name="mountain" className="h-4 w-4" /></span><div><h3 className="font-semibold text-slate-950">{item.name}</h3><p className="text-[11px] text-muted">{item.observations} observasi</p></div></div></div><div className="grid grid-cols-2 divide-x divide-line"><div className="p-5"><p className="text-[10px] uppercase tracking-wider text-muted">Cold</p><strong className="mt-2 block font-mono text-xl text-cyan">{number.format(item.cumulative_cold)}</strong><span className="text-[10px] text-muted">m³ kumulatif</span></div><div className="p-5"><p className="text-[10px] uppercase tracking-wider text-muted">Hot</p><strong className="mt-2 block font-mono text-xl text-amber">{number.format(item.cumulative_hot)}</strong><span className="text-[10px] text-muted">m³ kumulatif</span></div></div></article>)}</div>
-      </section>
-      <section className="surface mt-5 p-5 text-sm leading-7 text-slate-700"><div className="flex items-center gap-2 text-slate-950"><Icon name="chart" className="h-4 w-4 text-cyan" /><h2 className="font-semibold">Metode perhitungan</h2></div><p className="mt-3">ΣB21 dan MAX(B21) dihitung untuk setiap gunung pada waktu pengamatan yang sama.</p><div className="my-3 grid gap-2 font-mono text-xs text-cyan sm:grid-cols-2"><code className="rounded-lg border border-line bg-ink px-3 py-2">Ecold = 0,450 × ΣB21 − 0,127</code><code className="rounded-lg border border-line bg-ink px-3 py-2">Ehot = 0,164 × ΣB21 − 0,045</code></div><p>Integrasi blok ketiga = nilai baris sebelumnya × Δt. MeanE = (Ecold + Ehot) / 2 untuk scatter dan Ecold–Ehot menjadi envelope.</p><p className="mt-2 text-xs text-muted">Qcold = Ecold × {number.format(data.constants.cold_heat_density)} · Qhot = Ehot × {number.format(data.constants.hot_heat_density)}. Observasi pertama menjadi nilai awal kumulatif.</p></section>
-      <Charts volcanoes={filteredSummary} chartData={data.chart_data} filters={filters} />
+      <PageHeading eyebrow="Data calculation" title="Detail Perhitungan Effusion Rate Lava" description="Tabel hasil perhitungan estimasi effusion rate lava berdasarkan data MODIS." refreshing={refreshing} onRefresh={load} />
       <section id="detail-perhitungan" className="mt-10 scroll-mt-6"><SectionTitle index="03" title="Detail perhitungan" subtitle={`${filteredCalculations.length} baris sesuai gunung dan periode terpilih`} /><DataTable columns={LAVA_COLUMNS} rows={filteredCalculations} empty="Belum ada hasil perhitungan." /></section>
     </AppShell>
   );

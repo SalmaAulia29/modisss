@@ -105,6 +105,48 @@ def get_chart_data(volcanoes):
     return series
 
 
+def add_calculation_outputs(rows):
+    """Tambahkan MeanE dan cumulative Q dengan aturan integrasi blok ketiga."""
+    block1_totals = {}
+    previous_heat = {}
+    cumulative_heat = {}
+    for row in reversed(rows):
+        volcano_id = row["volcano_id"]
+        cold = float(row["cumulative_cold"])
+        hot = float(row["cumulative_hot"])
+        heat_cold = float(row["heat_flux_cold"])
+        heat_hot = float(row["heat_flux_hot"])
+        delta = int(row["delta_seconds"] or 0)
+        previous_cold, previous_hot = previous_heat.get(volcano_id, (0.0, 0.0))
+        total_cold, total_hot = cumulative_heat.get(volcano_id, (0.0, 0.0))
+        if volcano_id not in cumulative_heat:
+            total_cold = heat_cold
+            total_hot = heat_hot
+        else:
+            total_cold += previous_cold * delta
+            total_hot += previous_hot * delta
+        block1_e_cold, block1_e_hot, block1_q_cold, block1_q_hot = block1_totals.get(volcano_id, (0.0, 0.0, 0.0, 0.0))
+        block1_e_cold += float(row["effusion_cold"])
+        block1_e_hot += float(row["effusion_hot"])
+        block1_q_cold += heat_cold
+        block1_q_hot += heat_hot
+        row["cum_e_cold_block1"] = block1_e_cold
+        row["cum_e_hot_block1"] = block1_e_hot
+        row["mean_e_block1"] = (block1_e_cold + block1_e_hot) / 2
+        row["cum_q_cold_block1"] = block1_q_cold
+        row["cum_q_hot_block1"] = block1_q_hot
+        row["mean_q_block1"] = (block1_q_cold + block1_q_hot) / 2
+        row["mean_e_block3"] = (cold + hot) / 2
+        row["mean_e"] = (cold + hot) / 2
+        row["cumulative_q_cold"] = total_cold
+        row["cumulative_q_hot"] = total_hot
+        row["mean_q"] = (total_cold + total_hot) / 2
+        previous_heat[volcano_id] = (heat_cold, heat_hot)
+        cumulative_heat[volcano_id] = (total_cold, total_hot)
+        block1_totals[volcano_id] = (block1_e_cold, block1_e_hot, block1_q_cold, block1_q_hot)
+    return rows
+
+
 @app.get("/")
 def index():
     return {
@@ -180,7 +222,7 @@ def api_lava_volume():
         """
     )
     payload = {
-        "calculations": fetch_all(
+        "calculations": add_calculation_outputs(fetch_all(
             """
             SELECT c.*, v.name volcano_name
             FROM lava_volume_calculations c
@@ -189,7 +231,7 @@ def api_lava_volume():
             LIMIT %s
             """,
             (limit,),
-        ),
+        )),
         "summary": summary,
         "chart_data": get_chart_data(summary),
         "constants": {

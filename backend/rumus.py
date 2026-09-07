@@ -9,8 +9,8 @@ import os
 from dataclasses import dataclass
 
 
-COLD_HEAT_DENSITY = float(os.getenv("COLD_HEAT_DENSITY", "1007500"))
-HOT_HEAT_DENSITY = float(os.getenv("HOT_HEAT_DENSITY", "1456000"))
+COLD_HEAT_DENSITY = float(os.getenv("COLD_HEAT_DENSITY", "1007500000"))
+HOT_HEAT_DENSITY = float(os.getenv("HOT_HEAT_DENSITY", "1456000000"))
 
 
 @dataclass(frozen=True)
