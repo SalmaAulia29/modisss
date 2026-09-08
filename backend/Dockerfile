@@ -14,4 +14,4 @@ COPY database/railway_seed.sql ./railway_seed.sql
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "python bootstrap_db.py && exec gunicorn --bind 0.0.0.0:${BACKEND_PORT:-5000} --bind [::]:${BACKEND_PORT:-5000} --workers ${GUNICORN_WORKERS:-2} --access-logfile - --error-logfile - app:app"]
+CMD ["sh", "-c", "PORT=${PORT:-${BACKEND_PORT:-5000}}; python bootstrap_db.py && exec gunicorn --bind 0.0.0.0:${PORT} --bind [::]:${PORT} --workers ${GUNICORN_WORKERS:-2} --access-logfile - --error-logfile - app:app"]

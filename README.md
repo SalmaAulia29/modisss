@@ -62,7 +62,9 @@ Buat tiga service dari repository yang sama:
 3. **frontend** memakai Dockerfile `frontend/Dockerfile` dan menjadi satu-satunya
    service yang diberi public domain.
 
-Backend dan worker memakai reference variables dari service MySQL:
+Backend dan worker memakai reference variables dari service MySQL. Railway juga
+menyediakan `PORT` otomatis untuk service backend; Dockerfile backend akan
+menggunakan nilai tersebut dan tetap fallback ke `5000` saat dijalankan lokal:
 
 ```text
 DB_HOST=mysql.railway.internal
@@ -75,13 +77,14 @@ TZ=Asia/Jakarta
 ```
 
 Frontend membutuhkan runtime variable berikut. Sesuaikan `backend` dengan nama service
-backend di Railway:
+backend di Railway dan gunakan port yang sama dengan port internal backend:
 
 ```text
 BACKEND_URL=http://backend.railway.internal:5000
 ```
 
 Jangan membuat variable `PORT` secara manual pada frontend; Railway menyediakannya
-otomatis. Backend memakai port internal tetap `5000` (`BACKEND_PORT` hanya diperlukan
-jika memang ingin diganti). Snapshot `database/railway_seed.sql` dipakai hanya jika
+otomatis. Jika Railway memberi `PORT` berbeda pada backend, gunakan nilai itu pada
+`BACKEND_URL`, misalnya `http://backend.railway.internal:<PORT>`. Snapshot
+`database/railway_seed.sql` dipakai hanya jika
 database masih kosong; database yang sudah berisi tabel tidak akan ditimpa.
