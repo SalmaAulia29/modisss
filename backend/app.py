@@ -54,18 +54,37 @@ def get_worker_state():
 def get_volcanoes():
     return fetch_all(
         """
-        SELECT v.id, v.name, COUNT(d.id) total_data, MAX(d.datetime) last_data,
-            (SELECT status FROM collection_runs r WHERE r.volcano_id = v.id
-             ORDER BY r.id DESC LIMIT 1) last_status,
-            (SELECT started_at FROM collection_runs r WHERE r.volcano_id = v.id
-             ORDER BY r.id DESC LIMIT 1) last_check,
-            (SELECT rows_received FROM collection_runs r WHERE r.volcano_id = v.id
-             ORDER BY r.id DESC LIMIT 1) last_rows_received,
-            (SELECT rows_inserted FROM collection_runs r WHERE r.volcano_id = v.id
-             ORDER BY r.id DESC LIMIT 1) last_rows_inserted
+        SELECT v.id, v.name,
+            COALESCE(d.total_data, 0) total_data,
+            d.last_data,
+            cycle.last_status,
+            cycle.last_check,
+            COALESCE(cycle.rows_received, 0) last_rows_received,
+            COALESCE(cycle.rows_inserted, 0) last_rows_inserted
         FROM volcanoes v
-        LEFT JOIN modis_data d ON d.volcano_id = v.id
-        GROUP BY v.id, v.name
+        LEFT JOIN (
+            SELECT volcano_id, COUNT(*) total_data, MAX(datetime) last_data
+            FROM modis_data
+            GROUP BY volcano_id
+        ) d ON d.volcano_id = v.id
+        LEFT JOIN (
+            SELECT r.volcano_id,
+                CASE
+                    WHEN SUM(r.status = 'running') > 0 THEN 'running'
+                    WHEN SUM(r.status = 'failed') > 0 THEN 'failed'
+                    WHEN SUM(r.rows_received) > 0 THEN 'success'
+                    ELSE 'no_data'
+                END last_status,
+                MAX(r.started_at) last_check,
+                SUM(r.rows_received) rows_received,
+                SUM(r.rows_inserted) rows_inserted
+            FROM collection_runs r
+            JOIN worker_state ws
+                ON ws.id = 1
+                AND ws.last_started_at IS NOT NULL
+                AND r.started_at >= ws.last_started_at
+            GROUP BY r.volcano_id
+        ) cycle ON cycle.volcano_id = v.id
         ORDER BY v.name
         """
     )
@@ -179,12 +198,16 @@ def api_dashboard():
     )
     totals = fetch_one(
         """
-        SELECT COUNT(*) total_runs,
-            COALESCE(SUM(status = 'success'), 0) success_runs,
-            COALESCE(SUM(status = 'failed'), 0) failed_runs,
-            COALESCE(SUM(rows_inserted), 0) inserted,
+        SELECT COUNT(r.id) total_runs,
+            COALESCE(SUM(r.status IN ('success', 'no_data')), 0) success_runs,
+            COALESCE(SUM(r.status = 'failed'), 0) failed_runs,
+            COALESCE(SUM(r.rows_inserted), 0) inserted,
             (SELECT COUNT(*) FROM modis_data) total_data
-        FROM collection_runs
+        FROM worker_state ws
+        LEFT JOIN collection_runs r
+            ON ws.last_started_at IS NOT NULL
+            AND r.started_at >= ws.last_started_at
+        WHERE ws.id = 1
         """
     )
     volcanoes = get_volcanoes()
