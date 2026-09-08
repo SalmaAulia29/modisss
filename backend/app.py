@@ -108,7 +108,8 @@ def get_chart_data(volcanoes):
         )
         energy = fetch_all(
             """
-            SELECT observation_datetime, cumulative_cold, cumulative_hot
+            SELECT observation_datetime, effusion_cold, effusion_hot,
+                heat_flux_cold, heat_flux_hot, cumulative_cold, cumulative_hot
             FROM lava_volume_calculations
             WHERE volcano_id = %s
             ORDER BY observation_datetime

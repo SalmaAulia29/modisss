@@ -61,11 +61,18 @@ def energy_time_series(rows, volcano_name):
     hot = np.asarray([float(row["cumulative_hot"]) for row in rows])
     mean = (cold + hot) / 2
     lower, upper = np.minimum(cold, hot), np.maximum(cold, hot)
+    if len(mean) >= 2:
+        x = mdates.date2num(dates) - mdates.date2num(dates[0])
+        slope, intercept = np.polyfit(x, mean, 1)
+        smoothing = intercept + slope * x
+    else:
+        smoothing = mean
 
     axis.fill_between(dates, lower, upper, color=COLD, alpha=0.09, label="Rentang Ecold–Ehot")
     axis.plot(dates, cold, color=COLD, linewidth=1.8, label="Ecold")
     axis.plot(dates, hot, color=HOT, linewidth=1.8, label="Ehot")
     axis.scatter(dates, mean, color=MEAN, edgecolors=BACKGROUND, linewidths=0.7, s=30, zorder=4, label="MeanE")
+    axis.plot(dates, smoothing, color=MEAN, linewidth=2.2, label="Garis tren linear")
 
     axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=7))
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m-%Y"))

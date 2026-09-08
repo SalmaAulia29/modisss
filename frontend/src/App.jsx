@@ -65,6 +65,71 @@ function formatValue(value, key) {
   return String(value);
 }
 
+function recalculateFilteredRows(rows) {
+  const indexedRows = rows.map((row, index) => ({ row, index }));
+  const groupedRows = new Map();
+  indexedRows.forEach((item) => {
+    const group = groupedRows.get(item.row.volcano_id) || [];
+    group.push(item);
+    groupedRows.set(item.row.volcano_id, group);
+  });
+
+  const calculatedRows = new Map();
+  groupedRows.forEach((group) => {
+    group.sort((left, right) => new Date(left.row.observation_datetime) - new Date(right.row.observation_datetime));
+    let cumulativeCold = 0;
+    let cumulativeHot = 0;
+    let cumulativeQCold = 0;
+    let cumulativeQHot = 0;
+    let block1Cold = 0;
+    let block1Hot = 0;
+    let block1QCold = 0;
+    let block1QHot = 0;
+    group.forEach((item, position) => {
+      const previous = group[position - 1];
+      const seconds = previous
+        ? Math.max(0, Math.floor((new Date(item.row.observation_datetime) - new Date(previous.row.observation_datetime)) / 1000))
+        : 0;
+      const row = item.row;
+      block1Cold += Number(row.effusion_cold || 0);
+      block1Hot += Number(row.effusion_hot || 0);
+      block1QCold += Number(row.heat_flux_cold || 0);
+      block1QHot += Number(row.heat_flux_hot || 0);
+      if (previous) {
+        cumulativeCold += Number(previous.row.effusion_cold || 0) * seconds;
+        cumulativeHot += Number(previous.row.effusion_hot || 0) * seconds;
+        cumulativeQCold += Number(previous.row.heat_flux_cold || 0) * seconds;
+        cumulativeQHot += Number(previous.row.heat_flux_hot || 0) * seconds;
+      } else {
+        cumulativeCold = block1Cold;
+        cumulativeHot = block1Hot;
+        cumulativeQCold = block1QCold;
+        cumulativeQHot = block1QHot;
+      }
+      calculatedRows.set(item.index, {
+        ...row,
+        delta_seconds: seconds,
+        cum_e_cold_block1: block1Cold,
+        cum_e_hot_block1: block1Hot,
+        mean_e_block1: (block1Cold + block1Hot) / 2,
+        cum_q_cold_block1: block1QCold,
+        cum_q_hot_block1: block1QHot,
+        mean_q_block1: (block1QCold + block1QHot) / 2,
+        cumulative_cold: cumulativeCold,
+        cumulative_hot: cumulativeHot,
+        mean_e_block3: (cumulativeCold + cumulativeHot) / 2,
+        mean_e: (cumulativeCold + cumulativeHot) / 2,
+        cumulative_q_cold: cumulativeQCold,
+        cumulative_q_hot: cumulativeQHot,
+        mean_q: (cumulativeQCold + cumulativeQHot) / 2,
+        envelope: [Math.min(cumulativeCold, cumulativeHot), Math.max(cumulativeCold, cumulativeHot)],
+      });
+    });
+  });
+
+  return rows.map((row, index) => calculatedRows.get(index) || { ...row, delta_seconds: 0 });
+}
+
 function statusStyle(status) {
   return {
     success: "border-emerald-500/25 bg-emerald-50 text-emerald-700",
@@ -282,8 +347,44 @@ function compactNumber(value) {
   return new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
+function addMeanBestFit(rows) {
+  const points = rows.map((row, index) => ({
+    x: new Date(row.observation_datetime).getTime(),
+    y: Number(row.mean_e),
+    index,
+  })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (points.length < 2) return rows.map((row) => ({ ...row, mean_e_smooth: null }));
+
+  const origin = points[0].x;
+  const normalized = points.map((point) => ({ ...point, x: (point.x - origin) / 86400000 }));
+  const meanX = normalized.reduce((sum, point) => sum + point.x, 0) / normalized.length;
+  const meanY = normalized.reduce((sum, point) => sum + point.y, 0) / normalized.length;
+  const denominator = normalized.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+  const slope = denominator ? normalized.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator : 0;
+  const intercept = meanY - slope * meanX;
+  const fitted = new Map(normalized.map((point) => [point.index, intercept + slope * point.x]));
+  return rows.map((row, index) => ({ ...row, mean_e_smooth: fitted.get(index) ?? null }));
+}
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const validDate = label && !Number.isNaN(new Date(label).getTime());
+  const visibleItems = payload.filter((item) => ["envelope", "cumulative_cold", "cumulative_hot", "mean_e"].includes(item.dataKey));
+  return (
+    <div className="rounded-xl border border-line bg-white p-3 text-xs shadow-lg">
+      <p className="mb-2 font-medium text-slate-700">{validDate ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Waktu tidak tersedia"}</p>
+      {visibleItems.map((item) => {
+        const values = (Array.isArray(item.value) ? item.value : [item.value]).map(Number).filter(Number.isFinite);
+        if (!values.length) return null;
+        const value = values.length === 2 ? `${number.format(values[0])} - ${number.format(values[1])}` : number.format(values[0]);
+        return <p key={item.dataKey} style={{ color: item.color }}>{item.name}: {value}</p>;
+      })}
+    </div>
+  );
+}
+
 function ChartPanel({ volcano, rows }) {
-  const data = rows || [];
+  const data = addMeanBestFit((rows || []).filter((row) => Number.isFinite(Number(row.cumulative_cold)) && Number.isFinite(Number(row.cumulative_hot))));
   const downloadUrl = `/charts/energy/${volcano.id}.png?download=1`;
 
   return (
@@ -298,16 +399,17 @@ function ChartPanel({ volcano, rows }) {
       <div className="h-[330px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
         {data.length ? (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 4 }}>
+            <ComposedChart data={data} margin={{ top: 5, right: 12, left: 34, bottom: 4 }}>
               <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
-              <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} />
-              <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={48} />
-              <Tooltip contentStyle={chartTheme.tooltip} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} labelFormatter={(label) => new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })} formatter={(value, name) => [number.format(value), name]} />
+              <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal pengamatan", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Nilai E kumulatif (m³)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
               <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
               <Area type="monotone" dataKey="envelope" name="Rentang E" stroke="none" fill={chartTheme.cold} fillOpacity={0.08} activeDot={false} />
               <Line type="monotone" dataKey="cumulative_cold" name="Ecold" stroke={chartTheme.cold} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
               <Line type="monotone" dataKey="cumulative_hot" name="Ehot" stroke={chartTheme.hot} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
               <Scatter dataKey="mean_e" name="MeanE" fill={chartTheme.mean} line={false} shape="circle" />
+              <Line type="linear" dataKey="mean_e_smooth" name="Garis tren linear" legendType="none" stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} />
             </ComposedChart>
           </ResponsiveContainer>
         ) : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
@@ -343,10 +445,14 @@ function Charts({ volcanoes, chartData, dashboard = false, filters }) {
   const visibleVolcanoes = activeFilters.volcano === "all" ? volcanoes : volcanoes.filter((volcano) => String(volcano.id) === activeFilters.volcano);
   const isAfterStart = (row) => !activeFilters.startDate || String(row.observation_datetime).slice(0, 10) >= activeFilters.startDate;
   const isBeforeEnd = (row) => !activeFilters.endDate || String(row.observation_datetime).slice(0, 10) <= activeFilters.endDate;
+  const filteredChartRows = (volcano) => {
+    const rows = chartData?.[String(volcano.id)]?.energy?.filter((row) => isAfterStart(row) && isBeforeEnd(row)) || [];
+    return recalculateFilteredRows(rows);
+  };
   return (
     <section className="mt-10">
       <SectionTitle index={dashboard ? "04" : "02"} title="Grafik Estimasi Effusion Rate Lava" subtitle="Arahkan kursor ke grafik untuk melihat nilai tiap observasi" action={dashboard && <a href="/lava-volume" className="inline-flex items-center gap-2 text-xs font-semibold text-cyan hover:text-slate-950">Lihat perhitungan <Icon name="arrow" className="h-3.5 w-3.5" /></a>} />
-      <div className="grid gap-4 xl:grid-cols-2">{visibleVolcanoes.map((volcano) => <ChartPanel volcano={volcano} type="energy" rows={chartData?.[String(volcano.id)]?.energy?.filter((row) => isAfterStart(row) && isBeforeEnd(row))} key={volcano.id} />)}</div>
+      <div className="grid gap-4 xl:grid-cols-2">{visibleVolcanoes.map((volcano) => <ChartPanel volcano={volcano} type="energy" rows={filteredChartRows(volcano)} key={volcano.id} />)}</div>
     </section>
   );
 }
@@ -405,7 +511,7 @@ function Dashboard() {
       const rowDate = String(row.observation_datetime).slice(0, 10);
       return (appliedFilters.volcano === "all" || String(row.volcano_id) === appliedFilters.volcano) && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
     });
-    downloadCsv(`perhitungan-mean-e-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, LAVA_COLUMNS, rows);
+    downloadCsv(`perhitungan-mean-e-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, LAVA_COLUMNS, recalculateFilteredRows(rows));
   };
   const calculationUrl = appliedFilters ? (() => {
     const params = new URLSearchParams({ start: appliedFilters.startDate, end: appliedFilters.endDate });
@@ -461,7 +567,7 @@ function LavaVolume() {
     const rowDate = String(row.observation_datetime).slice(0, 10);
     return rowDate >= filters.startDate && (!filters.endDate || rowDate <= filters.endDate);
   };
-  const filteredCalculations = data.calculations.filter((row) => (filters.volcano === "all" || String(row.volcano_id) === filters.volcano) && isInPeriod(row));
+  const filteredCalculations = recalculateFilteredRows(data.calculations.filter((row) => (filters.volcano === "all" || String(row.volcano_id) === filters.volcano) && isInPeriod(row)));
   return (
     <AppShell page="lava">
       <PageHeading eyebrow="Data calculation" title="Detail Perhitungan Effusion Rate Lava" description="Tabel hasil perhitungan estimasi effusion rate lava berdasarkan data MODIS." refreshing={refreshing} onRefresh={load} />
