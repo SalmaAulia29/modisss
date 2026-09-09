@@ -17,6 +17,7 @@ MUTED = "#4b5563"
 COLD = "#3498db"
 HOT = "#ff7f0e"
 MEAN = "#202938"
+ENVELOPE = "#94a3b8"
 
 
 def _figure(title, y_label):
@@ -49,6 +50,26 @@ def _png_response(figure):
     return output
 
 
+def _phase_regressions(x, y):
+    """Bagi seri menjadi tiga fase dan hitung regresi linier tiap fase."""
+    if len(y) < 6:
+        return [(0, len(y), np.polyfit(x, y, 1))] if len(y) >= 2 else []
+
+    minimum_points = max(4, len(y) // 8)
+    best_error = float("inf")
+    best_ranges = None
+    for first_break in range(minimum_points, len(y) - minimum_points * 2 + 1):
+        for second_break in range(first_break + minimum_points, len(y) - minimum_points + 1):
+            ranges = [(0, first_break), (first_break, second_break), (second_break, len(y))]
+            error = 0.0
+            for start, end in ranges:
+                coefficients = np.polyfit(x[start:end], y[start:end], 1)
+                error += np.sum((y[start:end] - np.polyval(coefficients, x[start:end])) ** 2)
+            if error < best_error:
+                best_error, best_ranges = error, ranges
+    return [(start, end, np.polyfit(x[start:end], y[start:end], 1)) for start, end in best_ranges]
+
+
 def energy_time_series(rows, volcano_name):
     """Plot MeanE blok ketiga dengan envelope Ecold dan Ehot."""
     figure, axis = _figure(f"Scatter / Time Series MeanE · {volcano_name}", "Nilai E kumulatif (m³)")
@@ -61,18 +82,15 @@ def energy_time_series(rows, volcano_name):
     hot = np.asarray([float(row["cumulative_hot"]) for row in rows])
     mean = (cold + hot) / 2
     lower, upper = np.minimum(cold, hot), np.maximum(cold, hot)
-    if len(mean) >= 2:
-        x = mdates.date2num(dates) - mdates.date2num(dates[0])
-        slope, intercept = np.polyfit(x, mean, 1)
-        smoothing = intercept + slope * x
-    else:
-        smoothing = mean
+    x = mdates.date2num(dates) - mdates.date2num(dates[0])
 
-    axis.fill_between(dates, lower, upper, color=COLD, alpha=0.09, label="Rentang Ecold–Ehot")
+    axis.fill_between(dates, lower, upper, color=ENVELOPE, alpha=0.22, label="Envelope estimasi E")
     axis.plot(dates, cold, color=COLD, linewidth=1.8, label="Ecold")
     axis.plot(dates, hot, color=HOT, linewidth=1.8, label="Ehot")
     axis.scatter(dates, mean, color=MEAN, edgecolors=BACKGROUND, linewidths=0.7, s=30, zorder=4, label="MeanE")
-    axis.plot(dates, smoothing, color=MEAN, linewidth=2.2, label="Garis tren linear")
+    for phase_number, (start, end, coefficients) in enumerate(_phase_regressions(x, mean), 1):
+        axis.plot(dates[start:end], np.polyval(coefficients, x[start:end]), color=MEAN, linewidth=2.2,
+                  label="Regresi linier per fase" if phase_number == 1 else None)
 
     axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=7))
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m-%Y"))

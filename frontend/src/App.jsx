@@ -334,6 +334,7 @@ const chartTheme = {
   cold: "#087f8c",
   hot: "#a96710",
   mean: "#172033",
+  envelope: "#94a3b8",
   tooltip: { backgroundColor: "#ffffff", border: "1px solid #d9e2ec", borderRadius: "10px", color: "#172033", fontSize: "11px", boxShadow: "0 8px 24px rgba(15, 23, 42, 0.1)" },
 };
 
@@ -355,27 +356,51 @@ function addMeanBestFit(rows) {
   })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
   if (points.length < 2) return rows.map((row) => ({ ...row, mean_e_smooth: null }));
 
+  points.sort((left, right) => left.x - right.x);
   const origin = points[0].x;
   const normalized = points.map((point) => ({ ...point, x: (point.x - origin) / 86400000 }));
-  const meanX = normalized.reduce((sum, point) => sum + point.x, 0) / normalized.length;
-  const meanY = normalized.reduce((sum, point) => sum + point.y, 0) / normalized.length;
-  const denominator = normalized.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
-  const slope = denominator ? normalized.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator : 0;
-  const intercept = meanY - slope * meanX;
-  const fitted = new Map(normalized.map((point) => [point.index, intercept + slope * point.x]));
-  return rows.map((row, index) => ({ ...row, mean_e_smooth: fitted.get(index) ?? null }));
+  const fitSegment = (segment) => {
+    const meanX = segment.reduce((sum, point) => sum + point.x, 0) / segment.length;
+    const meanY = segment.reduce((sum, point) => sum + point.y, 0) / segment.length;
+    const denominator = segment.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+    const slope = denominator
+      ? segment.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator
+      : 0;
+    const intercept = meanY - slope * meanX;
+    return {
+      values: segment.map((point) => ({ index: point.index, value: intercept + slope * point.x })),
+      error: segment.reduce((sum, point) => sum + (point.y - (intercept + slope * point.x)) ** 2, 0),
+    };
+  };
+  const minimumPhasePoints = Math.max(4, Math.floor(normalized.length / 8));
+  let bestFit = null;
+  for (let firstBreak = minimumPhasePoints; firstBreak <= normalized.length - minimumPhasePoints * 2; firstBreak += 1) {
+    for (let secondBreak = firstBreak + minimumPhasePoints; secondBreak <= normalized.length - minimumPhasePoints; secondBreak += 1) {
+      const phases = [normalized.slice(0, firstBreak), normalized.slice(firstBreak, secondBreak), normalized.slice(secondBreak)].map(fitSegment);
+      const error = phases.reduce((sum, phase) => sum + phase.error, 0);
+      if (!bestFit || error < bestFit.error) bestFit = { error, phases };
+    }
+  }
+  const phaseMaps = (bestFit?.phases || [fitSegment(normalized)]).map((phase) => new Map(phase.values.map((point) => [point.index, point.value])));
+  return rows.map((row, index) => ({
+    ...row,
+    mean_e_smooth: phaseMaps.flatMap((values) => values.has(index) ? [values.get(index)] : []).at(0) ?? null,
+    mean_e_phase1: phaseMaps[0]?.get(index) ?? null,
+    mean_e_phase2: phaseMaps[1]?.get(index) ?? null,
+    mean_e_phase3: phaseMaps[2]?.get(index) ?? null,
+  }));
 }
 
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const validDate = label && !Number.isNaN(new Date(label).getTime());
-  const visibleItems = payload.filter((item) => ["envelope", "cumulative_cold", "cumulative_hot", "mean_e"].includes(item.dataKey));
+  const visibleItems = payload.filter((item) => ["envelope", "cumulative_cold", "cumulative_hot", "mean_e", "mean_e_phase1", "mean_e_phase2", "mean_e_phase3"].includes(item.dataKey));
   return (
     <div className="rounded-xl border border-line bg-white p-3 text-xs shadow-lg">
       <p className="mb-2 font-medium text-slate-700">{validDate ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Waktu tidak tersedia"}</p>
       {visibleItems.map((item) => {
         const values = (Array.isArray(item.value) ? item.value : [item.value]).map(Number).filter(Number.isFinite);
-        if (!values.length) return null;
+        if (!values.length || values.some((value) => !Number.isFinite(value))) return null;
         const value = values.length === 2 ? `${number.format(values[0])} - ${number.format(values[1])}` : number.format(values[0]);
         return <p key={item.dataKey} style={{ color: item.color }}>{item.name}: {value}</p>;
       })}
@@ -405,11 +430,13 @@ function ChartPanel({ volcano, rows }) {
               <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Nilai E kumulatif (m³)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
               <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
               <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
-              <Area type="monotone" dataKey="envelope" name="Rentang E" stroke="none" fill={chartTheme.cold} fillOpacity={0.08} activeDot={false} />
+              <Area type="monotone" dataKey="envelope" name="Envelope estimasi E" stroke="none" fill={chartTheme.envelope} fillOpacity={0.22} activeDot={false} />
               <Line type="monotone" dataKey="cumulative_cold" name="Ecold" stroke={chartTheme.cold} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
               <Line type="monotone" dataKey="cumulative_hot" name="Ehot" stroke={chartTheme.hot} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
               <Scatter dataKey="mean_e" name="MeanE" fill={chartTheme.mean} line={false} shape="circle" />
-              <Line type="linear" dataKey="mean_e_smooth" name="Garis tren linear" legendType="none" stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} />
+              <Line type="linear" dataKey="mean_e_phase1" name="Regresi Fase 1" stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} connectNulls={false} />
+              <Line type="linear" dataKey="mean_e_phase2" name="Regresi Fase 2" stroke="#496a8a" strokeWidth={2.4} dot={false} activeDot={false} connectNulls={false} />
+              <Line type="linear" dataKey="mean_e_phase3" name="Regresi Fase 3" stroke="#7c5f37" strokeWidth={2.4} dot={false} activeDot={false} connectNulls={false} />
             </ComposedChart>
           </ResponsiveContainer>
         ) : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
