@@ -51,23 +51,8 @@ def _png_response(figure):
 
 
 def _phase_regressions(x, y):
-    """Bagi seri menjadi tiga fase dan hitung regresi linier tiap fase."""
-    if len(y) < 6:
-        return [(0, len(y), np.polyfit(x, y, 1))] if len(y) >= 2 else []
-
-    minimum_points = max(4, len(y) // 8)
-    best_error = float("inf")
-    best_ranges = None
-    for first_break in range(minimum_points, len(y) - minimum_points * 2 + 1):
-        for second_break in range(first_break + minimum_points, len(y) - minimum_points + 1):
-            ranges = [(0, first_break), (first_break, second_break), (second_break, len(y))]
-            error = 0.0
-            for start, end in ranges:
-                coefficients = np.polyfit(x[start:end], y[start:end], 1)
-                error += np.sum((y[start:end] - np.polyval(coefficients, x[start:end])) ** 2)
-            if error < best_error:
-                best_error, best_ranges = error, ranges
-    return [(start, end, np.polyfit(x[start:end], y[start:end], 1)) for start, end in best_ranges]
+    """Hitung satu garis regresi linear untuk seluruh seri observasi."""
+    return [(0, len(y), np.polyfit(x, y, 1))] if len(y) >= 2 else []
 
 
 def energy_time_series(rows, volcano_name):
@@ -88,9 +73,9 @@ def energy_time_series(rows, volcano_name):
     axis.plot(dates, cold, color=COLD, linewidth=1.8, label="Ecold")
     axis.plot(dates, hot, color=HOT, linewidth=1.8, label="Ehot")
     axis.scatter(dates, mean, color=MEAN, edgecolors=BACKGROUND, linewidths=0.7, s=30, zorder=4, label="MeanE")
-    for phase_number, (start, end, coefficients) in enumerate(_phase_regressions(x, mean), 1):
+    for fit_number, (start, end, coefficients) in enumerate(_phase_regressions(x, mean), 1):
         axis.plot(dates[start:end], np.polyval(coefficients, x[start:end]), color=MEAN, linewidth=2.2,
-                  label="Regresi linier per fase" if phase_number == 1 else None)
+                  label="Linear fitting" if fit_number == 1 else None)
 
     axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=7))
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m-%Y"))
