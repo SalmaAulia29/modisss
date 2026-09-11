@@ -5,12 +5,13 @@ Modul ini tidak mengakses database agar rumus mudah digunakan ulang dan diuji.
 
 """Rumus murni estimasi volume lava MODIS Band 21."""
 
-import os
 from dataclasses import dataclass
 
 
-COLD_HEAT_DENSITY = float(os.getenv("COLD_HEAT_DENSITY", "1007500000"))
-HOT_HEAT_DENSITY = float(os.getenv("HOT_HEAT_DENSITY", "1456000000"))
+COLD_HEAT_DENSITY_FORMULA = 2600 * (1150 * 200 + 350000 * 0.45)
+HOT_HEAT_DENSITY_FORMULA = 2600 * (1150 * 350 + 350000 * 0.45)
+COLD_HEAT_DENSITY = COLD_HEAT_DENSITY_FORMULA
+HOT_HEAT_DENSITY = HOT_HEAT_DENSITY_FORMULA
 
 
 @dataclass(frozen=True)

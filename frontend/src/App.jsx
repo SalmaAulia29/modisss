@@ -35,6 +35,7 @@ const LAVA_COLUMNS = [
 ];
 
 const number = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
+const detailNumber = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 15 });
 const today = new Date().toISOString().slice(0, 10);
 
 function downloadCsv(filename, columns, rows) {
@@ -58,10 +59,7 @@ function formatValue(value, key) {
       timeStyle: "short",
     });
   }
-  if (typeof value === "number" && Math.abs(value) >= 1e8 && key.includes("heat_flux")) {
-    return value.toExponential(2);
-  }
-  if (typeof value === "number" && !Number.isInteger(value)) return number.format(value);
+  if (typeof value === "number") return detailNumber.format(value);
   return String(value);
 }
 
@@ -358,27 +356,61 @@ function addMeanBestFit(rows) {
 
   const origin = points[0].x;
   const normalized = points.map((point) => ({ ...point, x: (point.x - origin) / 86400000 }));
-  const meanX = normalized.reduce((sum, point) => sum + point.x, 0) / normalized.length;
-  const meanY = normalized.reduce((sum, point) => sum + point.y, 0) / normalized.length;
-  const denominator = normalized.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
-  const slope = denominator
-    ? normalized.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator
-    : 0;
-  const intercept = meanY - slope * meanX;
-  const pointByIndex = new Map(normalized.map((point) => [point.index, point]));
+  const minimumPoints = 3;
+  if (normalized.length < minimumPoints) return rows.map((row) => ({ ...row, mean_e_fit: null }));
+  const scale = Math.max(...normalized.map((point) => point.y)) - Math.min(...normalized.map((point) => point.y)) || 1;
+  const scaled = normalized.map((point) => ({ ...point, y: point.y / scale }));
+  const cache = new Map();
+  const fit = (start, end) => {
+    const key = `${start}:${end}`;
+    if (cache.has(key)) return cache.get(key);
+    const segment = scaled.slice(start, end);
+    const meanX = segment.reduce((sum, point) => sum + point.x, 0) / segment.length;
+    const meanY = segment.reduce((sum, point) => sum + point.y, 0) / segment.length;
+    const denominator = segment.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+    const slope = denominator ? segment.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator : 0;
+    const intercept = meanY - slope * meanX;
+    const residual = segment.reduce((sum, point) => sum + (point.y - (slope * point.x + intercept)) ** 2, 0);
+    const result = { slope, intercept, residual };
+    cache.set(key, result);
+    return result;
+  };
+  const costs = Array(normalized.length + 1).fill(Number.POSITIVE_INFINITY);
+  const phases = Array.from({ length: normalized.length + 1 }, () => []);
+  costs[0] = 0;
+  const penalty = 0.005;
+  for (let end = minimumPoints; end <= normalized.length; end += 1) {
+    for (let start = 0; start <= end - minimumPoints; start += 1) {
+      if (!Number.isFinite(costs[start])) continue;
+      const candidate = costs[start] + fit(start, end).residual + penalty;
+      if (candidate < costs[end]) {
+        costs[end] = candidate;
+        phases[end] = [...phases[start], start];
+      }
+    }
+  }
+  const phaseFits = phases[normalized.length].map((start, phaseIndex) => {
+    const end = phases[normalized.length][phaseIndex + 1] ?? normalized.length;
+    return { start, end, ...fit(start, end) };
+  });
+  const fitByIndex = phaseFits.map(() => new Map());
+  phaseFits.forEach(({ start, end, slope, intercept }, phaseIndex) => {
+    const first = scaled[start];
+    const last = scaled[end - 1];
+    fitByIndex[phaseIndex].set(first.index, (slope * first.x + intercept) * scale);
+    fitByIndex[phaseIndex].set(last.index, (slope * last.x + intercept) * scale);
+  });
 
   return rows.map((row, index) => ({
     ...row,
-    mean_e_fit: index === normalized[0].index || index === normalized[normalized.length - 1].index
-      ? intercept + slope * pointByIndex.get(index).x
-      : null,
+    ...Object.fromEntries(fitByIndex.map((values, phaseIndex) => [`mean_e_fit_${phaseIndex + 1}`, values.get(index) ?? null])),
   }));
 }
 
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const validDate = label && !Number.isNaN(new Date(label).getTime());
-  const visibleItems = payload.filter((item) => ["envelope", "cumulative_cold", "cumulative_hot", "mean_e", "mean_e_fit"].includes(item.dataKey));
+  const visibleItems = payload.filter((item) => ["envelope", "cumulative_cold", "cumulative_hot", "mean_e"].includes(item.dataKey) || String(item.dataKey).startsWith("mean_e_fit_"));
   return (
     <div className="rounded-xl border border-line bg-white p-3 text-xs shadow-lg">
       <p className="mb-2 font-medium text-slate-700">{validDate ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Waktu tidak tersedia"}</p>
@@ -394,6 +426,7 @@ function ChartTooltip({ active, payload, label }) {
 
 function ChartPanel({ volcano, rows }) {
   const data = addMeanBestFit((rows || []).filter((row) => Number.isFinite(Number(row.cumulative_cold)) && Number.isFinite(Number(row.cumulative_hot))));
+  const fitKeys = Object.keys(data[0] || {}).filter((key) => key.startsWith("mean_e_fit_"));
   const downloadUrl = `/charts/energy/${volcano.id}.png?download=1`;
 
   return (
@@ -418,7 +451,7 @@ function ChartPanel({ volcano, rows }) {
               <Line type="monotone" dataKey="cumulative_cold" name="Ecold" stroke={chartTheme.cold} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
               <Line type="monotone" dataKey="cumulative_hot" name="Ehot" stroke={chartTheme.hot} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
               <Scatter dataKey="mean_e" name="MeanE" fill={chartTheme.mean} line={false} shape="circle" />
-              <Line type="linear" dataKey="mean_e_fit" name="Linear fitting" stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} connectNulls />
+              {fitKeys.map((key, index) => <Line key={key} type="linear" dataKey={key} name={`Linear fitting fase ${index + 1}`} stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} connectNulls />)}
             </ComposedChart>
           </ResponsiveContainer>
         ) : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}

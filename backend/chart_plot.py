@@ -51,8 +51,48 @@ def _png_response(figure):
 
 
 def _phase_regressions(x, y):
-    """Hitung satu garis regresi linear untuk seluruh seri observasi."""
-    return [(0, len(y), np.polyfit(x, y, 1))] if len(y) >= 2 else []
+    """Bagi seri menjadi fase dengan slope yang relatif stabil.
+
+    Segmentasi dipilih dengan dynamic programming. Penalti kecil untuk setiap
+    fase mencegah garis baru dibuat kecuali benar-benar menurunkan error fit.
+    """
+    minimum_points = 3
+    if len(y) < minimum_points:
+        return [(0, len(y), np.polyfit(x, y, 1))] if len(y) >= 2 else []
+
+    y_scale = max(float(np.max(y) - np.min(y)), 1.0)
+    normalized_y = y / y_scale
+    cache = {}
+
+    def fit(start, end):
+        key = (start, end)
+        if key not in cache:
+            coefficients = np.polyfit(x[start:end], normalized_y[start:end], 1)
+            residual = normalized_y[start:end] - np.polyval(coefficients, x[start:end])
+            cache[key] = (coefficients, float(np.sum(residual ** 2)))
+        return cache[key]
+
+    costs = [float("inf")] * (len(y) + 1)
+    phases = [[] for _ in range(len(y) + 1)]
+    costs[0] = 0.0
+    penalty = 0.005
+    for end in range(minimum_points, len(y) + 1):
+        for start in range(0, end - minimum_points + 1):
+            if not np.isfinite(costs[start]):
+                continue
+            _, residual = fit(start, end)
+            candidate = costs[start] + residual + penalty
+            if candidate < costs[end]:
+                costs[end] = candidate
+                phases[end] = phases[start] + [start]
+
+    boundaries = phases[-1]
+    regressions = []
+    for phase_number, start in enumerate(boundaries):
+        end = boundaries[phase_number + 1] if phase_number + 1 < len(boundaries) else len(y)
+        coefficients, _ = fit(start, end)
+        regressions.append((start, end, coefficients * np.array([y_scale, y_scale])))
+    return regressions
 
 
 def energy_time_series(rows, volcano_name):

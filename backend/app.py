@@ -126,45 +126,65 @@ def get_chart_data(volcanoes):
 
 
 def add_calculation_outputs(rows):
-    """Tambahkan MeanE dan cumulative Q dengan aturan integrasi blok ketiga."""
-    block1_totals = {}
-    previous_heat = {}
-    cumulative_heat = {}
-    for row in reversed(rows):
-        volcano_id = row["volcano_id"]
-        cold = float(row["cumulative_cold"])
-        hot = float(row["cumulative_hot"])
-        heat_cold = float(row["heat_flux_cold"])
-        heat_hot = float(row["heat_flux_hot"])
-        delta = int(row["delta_seconds"] or 0)
-        previous_cold, previous_hot = previous_heat.get(volcano_id, (0.0, 0.0))
-        total_cold, total_hot = cumulative_heat.get(volcano_id, (0.0, 0.0))
-        if volcano_id not in cumulative_heat:
-            total_cold = heat_cold
-            total_hot = heat_hot
-        else:
-            total_cold += previous_cold * delta
-            total_hot += previous_hot * delta
-        block1_e_cold, block1_e_hot, block1_q_cold, block1_q_hot = block1_totals.get(volcano_id, (0.0, 0.0, 0.0, 0.0))
-        block1_e_cold += float(row["effusion_cold"])
-        block1_e_hot += float(row["effusion_hot"])
-        block1_q_cold += heat_cold
-        block1_q_hot += heat_hot
-        row["cum_e_cold_block1"] = block1_e_cold
-        row["cum_e_hot_block1"] = block1_e_hot
-        row["mean_e_block1"] = (block1_e_cold + block1_e_hot) / 2
-        row["cum_q_cold_block1"] = block1_q_cold
-        row["cum_q_hot_block1"] = block1_q_hot
-        row["mean_q_block1"] = (block1_q_cold + block1_q_hot) / 2
-        row["mean_e_block3"] = (cold + hot) / 2
-        row["mean_e"] = (cold + hot) / 2
-        row["cumulative_q_cold"] = total_cold
-        row["cumulative_q_hot"] = total_hot
-        row["mean_q"] = (total_cold + total_hot) / 2
-        previous_heat[volcano_id] = (heat_cold, heat_hot)
-        cumulative_heat[volcano_id] = (total_cold, total_hot)
-        block1_totals[volcano_id] = (block1_e_cold, block1_e_hot, block1_q_cold, block1_q_hot)
-    return rows
+    """Tambahkan hasil B1/B3 dalam urutan waktu yang konsisten.
+
+    Untuk setiap baris setelah baris pertama, integrasi memakai nilai baris
+    sebelumnya: hasil sebelumnya + (delta waktu baris ini x nilai sebelumnya).
+    """
+    indexed_rows = list(enumerate(rows))
+    groups = {}
+    for index, row in indexed_rows:
+        groups.setdefault(row["volcano_id"], []).append((index, row))
+
+    calculated = {}
+    for group in groups.values():
+        group.sort(key=lambda item: item[1]["observation_datetime"])
+        block1_e_cold = block1_e_hot = 0.0
+        block1_q_cold = block1_q_hot = 0.0
+        cumulative_cold = cumulative_hot = 0.0
+        cumulative_q_cold = cumulative_q_hot = 0.0
+
+        for position, (index, original_row) in enumerate(group):
+            row = dict(original_row)
+            effusion_cold = float(row["effusion_cold"] or 0)
+            effusion_hot = float(row["effusion_hot"] or 0)
+            heat_cold = float(row["heat_flux_cold"] or 0)
+            heat_hot = float(row["heat_flux_hot"] or 0)
+            delta = int(row["delta_seconds"] or 0)
+
+            block1_e_cold += effusion_cold
+            block1_e_hot += effusion_hot
+            block1_q_cold += heat_cold
+            block1_q_hot += heat_hot
+
+            if position == 0:
+                cumulative_cold = effusion_cold
+                cumulative_hot = effusion_hot
+                cumulative_q_cold = heat_cold
+                cumulative_q_hot = heat_hot
+            else:
+                previous = group[position - 1][1]
+                cumulative_cold += float(previous["effusion_cold"] or 0) * delta
+                cumulative_hot += float(previous["effusion_hot"] or 0) * delta
+                cumulative_q_cold += float(previous["heat_flux_cold"] or 0) * delta
+                cumulative_q_hot += float(previous["heat_flux_hot"] or 0) * delta
+
+            row["cum_e_cold_block1"] = block1_e_cold
+            row["cum_e_hot_block1"] = block1_e_hot
+            row["mean_e_block1"] = (block1_e_cold + block1_e_hot) / 2
+            row["cum_q_cold_block1"] = block1_q_cold
+            row["cum_q_hot_block1"] = block1_q_hot
+            row["mean_q_block1"] = (block1_q_cold + block1_q_hot) / 2
+            row["cumulative_cold"] = cumulative_cold
+            row["cumulative_hot"] = cumulative_hot
+            row["mean_e_block3"] = (cumulative_cold + cumulative_hot) / 2
+            row["mean_e"] = (cumulative_cold + cumulative_hot) / 2
+            row["cumulative_q_cold"] = cumulative_q_cold
+            row["cumulative_q_hot"] = cumulative_q_hot
+            row["mean_q"] = (cumulative_q_cold + cumulative_q_hot) / 2
+            calculated[index] = row
+
+    return [calculated[index] for index in range(len(rows))]
 
 
 @app.get("/")
