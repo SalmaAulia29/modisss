@@ -23,15 +23,15 @@ const MODIS_COLUMNS = [
 ];
 
 const LAVA_COLUMNS = [
-  ["Time", "observation_datetime"], ["sigmaB21", "sum_b21"], ["Ecold", "effusion_cold"],
-  ["Ehot", "effusion_hot"], ["Qcold", "heat_flux_cold"], ["Qhot", "heat_flux_hot"],
-  ["cumEcold [B1]", "cum_e_cold_block1"], ["cumEhot [B1]", "cum_e_hot_block1"],
-  ["meanE [B1]", "mean_e_block1"], ["cumQcold [B1]", "cum_q_cold_block1"],
-  ["cumQhot [B1]", "cum_q_hot_block1"], ["meanQ [B1]", "mean_q_block1"],
-  ["second", "delta_seconds"], ["cumEcold [B3]", "cumulative_cold"],
-  ["cumEhot [B3]", "cumulative_hot"], ["meanE [B3]", "mean_e_block3"],
-  ["cumQcold [B3]", "cumulative_q_cold"], ["cumQhot [B3]", "cumulative_q_hot"],
-  ["meanQ [B3]", "mean_q"],
+  ["Time", "observation_datetime"], ["npixel (pixel)", "pixel_count"], ["B21max (W/m² sr µm)", "max_b21"], ["sigmaB21 (W/m² sr µm)", "sum_b21"], ["Ecold (m³/s)", "effusion_cold"],
+  ["Ehot (m³/s)", "effusion_hot"], ["Qcold (W)", "heat_flux_cold"], ["Qhot (W)", "heat_flux_hot"],
+  ["cumEcold [B1] (m³/s)", "cum_e_cold_block1"], ["cumEhot [B1] (m³/s)", "cum_e_hot_block1"],
+  ["meanE [B1] (m³/s)", "mean_e_block1"], ["cumQcold [B1] (W)", "cum_q_cold_block1"],
+  ["cumQhot [B1] (W)", "cum_q_hot_block1"], ["meanQ [B1] (W)", "mean_q_block1"],
+  ["second (s)", "delta_seconds"], ["cumEcold [B3] (m³)", "cumulative_cold"],
+  ["cumEhot [B3] (m³)", "cumulative_hot"], ["meanE [B3] (m³)", "mean_e_block3"],
+  ["cumQcold [B3] (J)", "cumulative_q_cold"], ["cumQhot [B3] (J)", "cumulative_q_hot"],
+  ["meanQ [B3] (J)", "mean_q"],
 ];
 
 const number = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
@@ -120,7 +120,8 @@ function recalculateFilteredRows(rows) {
         cumulative_q_cold: cumulativeQCold,
         cumulative_q_hot: cumulativeQHot,
         mean_q: (cumulativeQCold + cumulativeQHot) / 2,
-        envelope: [Math.min(cumulativeCold, cumulativeHot), Math.max(cumulativeCold, cumulativeHot)],
+        volume_envelope: [Math.min(cumulativeCold, cumulativeHot), Math.max(cumulativeCold, cumulativeHot)],
+        power_envelope: [Math.min(cumulativeQCold, cumulativeQHot), Math.max(cumulativeQCold, cumulativeQHot)],
       });
     });
   });
@@ -410,7 +411,7 @@ function addMeanBestFit(rows) {
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const validDate = label && !Number.isNaN(new Date(label).getTime());
-  const visibleItems = payload.filter((item) => ["envelope", "cumulative_cold", "cumulative_hot", "mean_e"].includes(item.dataKey) || String(item.dataKey).startsWith("mean_e_fit_"));
+  const visibleItems = payload.filter((item) => ["pixel_count", "max_b21", "sum_b21", "effusion_cold", "effusion_hot", "heat_flux_cold", "heat_flux_hot", "volume_envelope", "cumulative_cold", "cumulative_hot", "mean_e", "power_envelope", "cumulative_q_cold", "cumulative_q_hot", "mean_q"].includes(item.dataKey) || String(item.dataKey).startsWith("mean_e_fit_"));
   return (
     <div className="rounded-xl border border-line bg-white p-3 text-xs shadow-lg">
       <p className="mb-2 font-medium text-slate-700">{validDate ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Waktu tidak tersedia"}</p>
@@ -427,16 +428,14 @@ function ChartTooltip({ active, payload, label }) {
 function ChartPanel({ volcano, rows }) {
   const data = addMeanBestFit((rows || []).filter((row) => Number.isFinite(Number(row.cumulative_cold)) && Number.isFinite(Number(row.cumulative_hot))));
   const fitKeys = Object.keys(data[0] || {}).filter((key) => key.startsWith("mean_e_fit_"));
-  const downloadUrl = `/charts/energy/${volcano.id}.png?download=1`;
 
   return (
     <article className="surface overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+      <div className="border-b border-line px-5 py-4">
         <div>
-          <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-cyan" /><h3 className="text-sm font-semibold text-slate-950">Grafik Estimasi Effusion Rate Lava</h3></div>
+          <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-cyan" /><h3 className="text-sm font-semibold text-slate-950">(e) Cumulative Power &amp; Volume</h3></div>
           <p className="mt-1 pl-3.5 text-[10px] uppercase tracking-[0.12em] text-muted">{volcano.name} · {data.length} titik data</p>
         </div>
-        <a href={downloadUrl} download className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-700 transition-colors hover:border-cyan/40 hover:text-cyan" title="Unduh grafik hasil Matplotlib dan Scikit-learn"><Icon name="download" className="h-3.5 w-3.5" />Unduh PNG</a>
       </div>
       <div className="h-[330px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
         {data.length ? (
@@ -444,17 +443,77 @@ function ChartPanel({ volcano, rows }) {
             <ComposedChart data={data} margin={{ top: 5, right: 12, left: 34, bottom: 4 }}>
               <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
               <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal pengamatan", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
-              <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Nilai E kumulatif (m³)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis yAxisId="power" tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Power (J)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis yAxisId="volume" orientation="right" tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Volume (m³)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
               <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
               <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
-              <Area type="monotone" dataKey="envelope" name="Envelope estimasi E" stroke="none" fill={chartTheme.envelope} fillOpacity={0.22} activeDot={false} />
-              <Line type="monotone" dataKey="cumulative_cold" name="Ecold" stroke={chartTheme.cold} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
-              <Line type="monotone" dataKey="cumulative_hot" name="Ehot" stroke={chartTheme.hot} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
-              <Scatter dataKey="mean_e" name="MeanE" fill={chartTheme.mean} line={false} shape="circle" />
-              {fitKeys.map((key, index) => <Line key={key} type="linear" dataKey={key} name={`Linear fitting fase ${index + 1}`} stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} connectNulls />)}
+              <Area yAxisId="volume" type="monotone" dataKey="volume_envelope" name="Envelope volume (m³)" stroke="none" fill={chartTheme.envelope} fillOpacity={0.22} activeDot={false} />
+              <Line yAxisId="volume" type="monotone" dataKey="cumulative_cold" name="Cumulative volume cold (m³)" stroke={chartTheme.cold} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
+              <Line yAxisId="volume" type="monotone" dataKey="cumulative_hot" name="Cumulative volume hot (m³)" stroke={chartTheme.hot} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
+              <Scatter yAxisId="volume" dataKey="mean_e" name="Mean volume (m³)" fill={chartTheme.mean} line={false} shape="circle" />
+              <Area yAxisId="power" type="monotone" dataKey="power_envelope" name="Envelope power (J)" stroke="none" fill="#f4a261" fillOpacity={0.18} activeDot={false} />
+              <Line yAxisId="power" type="monotone" dataKey="cumulative_q_cold" name="Cumulative power cold (J)" stroke="#e76f51" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
+              <Line yAxisId="power" type="monotone" dataKey="cumulative_q_hot" name="Cumulative power hot (J)" stroke="#c1121f" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
+              <Scatter yAxisId="power" dataKey="mean_q" name="Mean power (J)" fill="#9b2226" line={false} shape="circle" />
+              {fitKeys.map((key, index) => <Line yAxisId="volume" key={key} type="linear" dataKey={key} name={`Gradien/Slope fase ${index + 1} (m³/hari)`} stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} connectNulls />)}
             </ComposedChart>
           </ResponsiveContainer>
         ) : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
+      </div>
+    </article>
+  );
+}
+
+const observationCharts = [
+  { key: "pixel_count", title: "(a) Jumlah Hotspot Terdeteksi", axis: "Jumlah pixel terdeteksi (pixel)", color: "#202938", unit: "pixel", label: "npixel" },
+  { key: "max_b21", title: "(b) Spectral Radiance Maximum", axis: "B21max (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "B21max" },
+  { key: "sum_b21", title: "(c) Spectral Radiance Total", axis: "Σ B21 (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "Σ B21" },
+];
+
+function ObservationChart({ volcano, rows, config }) {
+  return (
+    <article className="surface overflow-hidden">
+      <div className="border-b border-line px-5 py-4">
+        <h3 className="text-sm font-semibold text-slate-950">{config.title}</h3>
+        <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-muted">{volcano.name} · {rows.length} titik data</p>
+      </div>
+      <div className="h-[280px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
+        {rows.length ? <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={rows} margin={{ top: 5, right: 12, left: 34, bottom: 4 }}>
+            <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
+            <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
+            <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: config.axis, angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
+            <Scatter dataKey={config.key} name={`${config.label} (${config.unit})`} fill={config.color} line={{ stroke: config.color, strokeWidth: 0.7, strokeDasharray: "2 3" }} shape="circle" />
+          </ComposedChart>
+        </ResponsiveContainer> : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
+      </div>
+    </article>
+  );
+}
+
+function FluxChart({ volcano, rows }) {
+  return (
+    <article className="surface overflow-hidden xl:col-span-2">
+      <div className="border-b border-line px-5 py-4">
+        <h3 className="text-sm font-semibold text-slate-950">(d) Heat &amp; Volume Flux</h3>
+        <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-muted">{volcano.name} · {rows.length} titik data</p>
+      </div>
+      <div className="h-[300px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
+        {rows.length ? <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={rows} margin={{ top: 5, right: 42, left: 42, bottom: 4 }}>
+            <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
+            <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
+            <YAxis yAxisId="heat" tickFormatter={compactNumber} stroke="#d62828" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Heat Flux (W)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <YAxis yAxisId="volume" orientation="right" tickFormatter={compactNumber} stroke="#1565c0" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Volume Flux (m³/s)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
+            <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
+            <Scatter yAxisId="heat" dataKey="heat_flux_cold" name="Qcold / Heat Flux cold (W)" fill="#1565c0" line={{ stroke: "#1565c0", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+            <Scatter yAxisId="heat" dataKey="heat_flux_hot" name="Qhot / Heat Flux hot (W)" fill="#d62828" line={{ stroke: "#d62828", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+            <Scatter yAxisId="volume" dataKey="effusion_cold" name="Ecold / Volume Flux cold (m³/s)" fill="#1565c0" line={{ stroke: "#1565c0", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+            <Scatter yAxisId="volume" dataKey="effusion_hot" name="Ehot / Volume Flux hot (m³/s)" fill="#d62828" line={{ stroke: "#d62828", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+          </ComposedChart>
+        </ResponsiveContainer> : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
       </div>
     </article>
   );
@@ -466,7 +525,7 @@ function AnalysisFilters({ volcanoes, values, onChange }) {
       <label className="text-xs font-semibold text-slate-700">
         Pilih gunung
         <select value={values.volcano} onChange={(event) => onChange("volcano", event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan">
-          <option value="all">Semua gunung</option>
+          <option value="">Pilih gunung</option>
           {volcanoes.map((volcano) => <option value={String(volcano.id)} key={volcano.id}>{volcano.name}</option>)}
         </select>
       </label>
@@ -483,8 +542,8 @@ function AnalysisFilters({ volcanoes, values, onChange }) {
 }
 
 function Charts({ volcanoes, chartData, dashboard = false, filters }) {
-  const activeFilters = filters || { volcano: "all", startDate: "", endDate: "" };
-  const visibleVolcanoes = activeFilters.volcano === "all" ? volcanoes : volcanoes.filter((volcano) => String(volcano.id) === activeFilters.volcano);
+  const activeFilters = filters || { volcano: "", startDate: "", endDate: "" };
+  const visibleVolcanoes = volcanoes.filter((volcano) => String(volcano.id) === activeFilters.volcano);
   const isAfterStart = (row) => !activeFilters.startDate || String(row.observation_datetime).slice(0, 10) >= activeFilters.startDate;
   const isBeforeEnd = (row) => !activeFilters.endDate || String(row.observation_datetime).slice(0, 10) <= activeFilters.endDate;
   const filteredChartRows = (volcano) => {
@@ -493,8 +552,21 @@ function Charts({ volcanoes, chartData, dashboard = false, filters }) {
   };
   return (
     <section className="mt-10">
-      <SectionTitle index={dashboard ? "04" : "02"} title="Grafik Estimasi Effusion Rate Lava" subtitle="Arahkan kursor ke grafik untuk melihat nilai tiap observasi" action={dashboard && <a href="/lava-volume" className="inline-flex items-center gap-2 text-xs font-semibold text-cyan hover:text-slate-950">Lihat perhitungan <Icon name="arrow" className="h-3.5 w-3.5" /></a>} />
-      <div className="grid gap-4 xl:grid-cols-2">{visibleVolcanoes.map((volcano) => <ChartPanel volcano={volcano} type="energy" rows={filteredChartRows(volcano)} key={volcano.id} />)}</div>
+      <SectionTitle index={dashboard ? "04" : "02"} title="Analisis Anomali Thermal" subtitle="Arahkan kursor ke grafik untuk melihat nilai tiap observasi" action={dashboard && <a href="/lava-volume" className="inline-flex items-center gap-2 text-xs font-semibold text-cyan hover:text-slate-950">Lihat perhitungan <Icon name="arrow" className="h-3.5 w-3.5" /></a>} />
+      <div className="space-y-8">
+        {visibleVolcanoes.map((volcano) => {
+          const rows = filteredChartRows(volcano);
+          return <div className="space-y-4" key={volcano.id}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-950">{volcano.name}</h3>
+              <a href={`/charts/thermal/${volcano.id}.png?download=1`} download className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-700 transition-colors hover:border-cyan/40 hover:text-cyan" title="Unduh seluruh grafik anomali thermal"><Icon name="download" className="h-3.5 w-3.5" />Unduh PNG a-e</a>
+            </div>
+            {observationCharts.map((config) => <ObservationChart volcano={volcano} rows={rows} config={config} key={`${volcano.id}-${config.key}`} />)}
+            <FluxChart volcano={volcano} rows={rows} />
+            <ChartPanel volcano={volcano} type="energy" rows={rows} />
+          </div>;
+        })}
+      </div>
     </section>
   );
 }
@@ -505,7 +577,7 @@ function DashboardFilter({ volcanoes, values, onChange, onSubmit }) {
       <label className="text-xs font-semibold text-slate-700">
         Gunung
         <select value={values.volcano} onChange={(event) => onChange("volcano", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan">
-          <option value="all">Semua gunung</option>
+          <option value="">Pilih gunung</option>
           {volcanoes.map((volcano) => <option value={String(volcano.id)} key={volcano.id}>{volcano.name}</option>)}
         </select>
       </label>
@@ -530,7 +602,7 @@ function ActionCard({ icon, title, description, onClick, href, disabled = false 
 
 function Dashboard() {
   const { data, error, loading, refreshing, load } = useApi("/api/dashboard");
-  const [filters, setFilters] = useState({ volcano: "all", startDate: "2026-01-01", endDate: today });
+  const [filters, setFilters] = useState({ volcano: "", startDate: "2026-01-01", endDate: today });
   const [appliedFilters, setAppliedFilters] = useState(null);
   const [activePanel, setActivePanel] = useState("");
   if (loading && !data) return <AppShell page="dashboard"><Loading /></AppShell>;
@@ -538,10 +610,11 @@ function Dashboard() {
   const online = !["error", "failed"].includes(data.worker?.status);
   const selectedRows = appliedFilters ? data.modis_data.filter((row) => {
     const rowDate = String(row.datetime).slice(0, 10);
-    return (appliedFilters.volcano === "all" || String(data.volcanoes.find((volcano) => volcano.name === row.volcano_name)?.id) === appliedFilters.volcano) && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
+    return String(data.volcanoes.find((volcano) => volcano.name === row.volcano_name)?.id) === appliedFilters.volcano && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
   }) : [];
   const applyFilters = (event) => {
     event.preventDefault();
+    if (!filters.volcano) return;
     setAppliedFilters(filters);
     setActivePanel("");
   };
@@ -551,13 +624,13 @@ function Dashboard() {
     const payload = await response.json();
     const rows = (payload.calculations || []).filter((row) => {
       const rowDate = String(row.observation_datetime).slice(0, 10);
-      return (appliedFilters.volcano === "all" || String(row.volcano_id) === appliedFilters.volcano) && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
+      return String(row.volcano_id) === appliedFilters.volcano && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
     });
     downloadCsv(`perhitungan-mean-e-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, LAVA_COLUMNS, recalculateFilteredRows(rows));
   };
   const calculationUrl = appliedFilters ? (() => {
     const params = new URLSearchParams({ start: appliedFilters.startDate, end: appliedFilters.endDate });
-    if (appliedFilters.volcano !== "all") params.set("volcano", appliedFilters.volcano);
+    params.set("volcano", appliedFilters.volcano);
     return `/lava-volume?${params.toString()}#detail-perhitungan`;
   })() : "/lava-volume";
   return (
@@ -597,7 +670,7 @@ function Monitoring() {
 function LavaVolume() {
   const { data, error, loading, refreshing, load } = useApi("/api/lava-volume", 60);
   const query = new URLSearchParams(window.location.search);
-  const [filters, setFilters] = useState({ volcano: query.get("volcano") || "all", startDate: query.get("start") || "2026-01-01", endDate: query.get("end") || "" });
+  const [filters, setFilters] = useState({ volcano: query.get("volcano") || "", startDate: query.get("start") || "2026-01-01", endDate: query.get("end") || "" });
   useEffect(() => {
     if (data && window.location.hash === "#detail-perhitungan") {
       document.getElementById("detail-perhitungan")?.scrollIntoView({ behavior: "smooth" });
@@ -609,7 +682,7 @@ function LavaVolume() {
     const rowDate = String(row.observation_datetime).slice(0, 10);
     return rowDate >= filters.startDate && (!filters.endDate || rowDate <= filters.endDate);
   };
-  const filteredCalculations = recalculateFilteredRows(data.calculations.filter((row) => (filters.volcano === "all" || String(row.volcano_id) === filters.volcano) && isInPeriod(row)));
+  const filteredCalculations = recalculateFilteredRows(data.calculations.filter((row) => String(row.volcano_id) === filters.volcano && isInPeriod(row)));
   return (
     <AppShell page="lava">
       <PageHeading eyebrow="Data calculation" title="Detail Perhitungan Effusion Rate Lava" description="Tabel hasil perhitungan estimasi effusion rate lava berdasarkan data MODIS." refreshing={refreshing} onRefresh={load} />

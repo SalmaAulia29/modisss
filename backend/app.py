@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from flask import Flask, jsonify, request, send_file
 
-from chart_plot import daily_volume_chart, energy_time_series
+from chart_plot import daily_volume_chart, energy_time_series, thermal_anomaly_chart
 from connect_db import get_connection
 from rumus import COLD_HEAT_DENSITY, HOT_HEAT_DENSITY
 
@@ -108,8 +108,9 @@ def get_chart_data(volcanoes):
         )
         energy = fetch_all(
             """
-            SELECT observation_datetime, effusion_cold, effusion_hot,
-                heat_flux_cold, heat_flux_hot, cumulative_cold, cumulative_hot
+            SELECT observation_datetime, pixel_count, sum_b21, max_b21,
+                effusion_cold, effusion_hot, heat_flux_cold, heat_flux_hot,
+                cumulative_cold, cumulative_hot
             FROM lava_volume_calculations
             WHERE volcano_id = %s
             ORDER BY observation_datetime
@@ -318,7 +319,8 @@ def energy_chart_png(volcano_id):
         return {"error": "Gunung tidak ditemukan"}, 404
     rows = fetch_all(
         """
-        SELECT observation_datetime, cumulative_cold, cumulative_hot
+        SELECT observation_datetime, cumulative_cold, cumulative_hot,
+            heat_flux_cold, heat_flux_hot
         FROM lava_volume_calculations
         WHERE volcano_id = %s
         ORDER BY observation_datetime
@@ -329,11 +331,35 @@ def energy_chart_png(volcano_id):
         energy_time_series(rows, volcano["name"]),
         mimetype="image/png",
         as_attachment=request.args.get("download") == "1",
-        download_name=f"mean-energy-{volcano_id}.png",
+        download_name=f"cumulative-power-volume-{volcano_id}.png",
         max_age=0,
     )
 
 
+@app.get("/charts/thermal/<int:volcano_id>.png")
+def thermal_chart_png(volcano_id):
+    volcano = fetch_one("SELECT name FROM volcanoes WHERE id = %s", (volcano_id,))
+    if not volcano:
+        return {"error": "Gunung tidak ditemukan"}, 404
+    rows = fetch_all(
+        """
+        SELECT volcano_id, observation_datetime, delta_seconds, pixel_count, sum_b21, max_b21,
+            effusion_cold, effusion_hot, heat_flux_cold, heat_flux_hot,
+            cumulative_cold, cumulative_hot
+        FROM lava_volume_calculations
+        WHERE volcano_id = %s
+        ORDER BY observation_datetime
+        """,
+        (volcano_id,),
+    )
+    rows = add_calculation_outputs(rows)
+    return send_file(
+        thermal_anomaly_chart(rows, volcano["name"]),
+        mimetype="image/png",
+        as_attachment=request.args.get("download") == "1",
+        download_name=f"anomali-termal-{volcano_id}.png",
+        max_age=0,
+    )
 @app.get("/api/status")
 def api_status():
     limit = max(1, min(request.args.get("limit", 20, type=int), 100))
