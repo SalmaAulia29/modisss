@@ -1,0 +1,100 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Calibri;}{\f1 Consolas;}}
+{\colortbl;\red16\green72\blue78;\red31\green41\blue55;}
+\viewkind4\uc1
+\pard\qc\sa240\cf1\b\fs36 SISTEM PEMANTAUAN HOTSPOT MODIS\par
+\pard\qc\sa120\cf2\b\fs28 DAN ESTIMASI VOLUME LAVA\par
+\pard\qc\sa240\cf2\b0\fs22 PADA GUNUNG IBU DAN GUNUNG LEWOTOLOK\par
+\pard\qc\sa360\fs20 Script Presentasi Progres dan Penjelasan Alur Web\par
+\pard\qc\i\fs20 Salma Aulia Nisa - Aditya Permana\i0\par
+\page
+\pard\sa180\cf1\b\fs28 1. Pembukaan\par
+\pard\sa120\cf2\b0\fs22 Selamat pagi/siang. Saya akan mempresentasikan progres pekerjaan dengan judul Sistem Pemantauan Hotspot MODIS dan Estimasi Volume Lava pada Gunung Ibu dan Gunung Lewotolok.\par
+\pard\sa120 Sistem ini dibuat dalam bentuk aplikasi web untuk mengambil data hotspot MODIS secara berkala, menyimpannya ke database, mengolahnya menjadi estimasi effusion rate dan volume lava, kemudian menampilkannya dalam bentuk dashboard dan grafik.\par
+\pard\sa240\cf1\b\fs28 2. Latar Belakang dan Tujuan\par
+\pard\sa120\cf2\b0\fs22 Gunung Ibu dan Gunung Lewotolok merupakan gunung api aktif yang membutuhkan pemantauan secara berkala. Salah satu data yang dapat digunakan adalah data hotspot dari satelit MODIS.\par
+\pard\sa120 Jika pengolahan dilakukan secara manual, prosesnya membutuhkan waktu dan hasilnya masih berupa tabel yang sulit digunakan untuk melihat perkembangan aktivitas secara cepat.\par
+\pard\sa120 Oleh karena itu, sistem ini dibuat untuk:\par
+\pard\li360\sa60 1. Mengambil data MODIS secara berkala.\par
+\pard\li360\sa60 2. Memfilter data berdasarkan area gunung.\par
+\pard\li360\sa60 3. Menyimpan data hotspot ke database.\par
+\pard\li360\sa60 4. Menghitung effusion rate, heat flux, dan estimasi volume lava.\par
+\pard\li360\sa120 5. Menampilkan hasil melalui dashboard web.\par
+\pard\li0\sa240\cf1\b\fs28 3. Teknologi yang Digunakan\par
+\pard\sa120\cf2\b0\fs22 Sistem ini menggunakan beberapa komponen yang terpisah. Worker Python bertugas mengambil data MODIS secara berkala. Backend Flask menyediakan API untuk mengakses data dan hasil perhitungan. MySQL digunakan untuk menyimpan data. Frontend React menampilkan dashboard, tabel, filter, grafik, dan ekspor CSV. Docker digunakan untuk menjalankan layanan secara terpisah dan konsisten.\par
+\pard\sa240\cf1\b\fs28 4. Alur Sistem\par
+\pard\sa120\cf2\b0\fs22 Alur sistem secara umum adalah:\par
+\pard\qc\f1\fs20 Sumber MODIS -> Worker -> Validasi dan Filter -> MySQL -> Perhitungan Lava -> API Flask -> Dashboard React\par
+\pard\ql\f0\fs22\sa120 Sistem dimulai ketika worker mengirim request ke server MODIS berdasarkan tanggal dan area gunung. Data yang diterima diperiksa formatnya dan difilter berdasarkan longitude serta latitude. Data yang valid disimpan ke MySQL.\par
+\pard\sa120 Setelah data tersimpan, sistem menghitung effusion rate, heat flux, volume per interval, dan volume kumulatif. Backend menyediakan hasil tersebut melalui API, lalu frontend mengambil API dan menampilkannya kepada pengguna.\par
+\pard\sa240\cf1\b\fs28 5. Data yang Diproses\par
+\pard\sa120\cf2\b0\fs22 Data MODIS berisi waktu pengamatan, nama satelit, koordinat, nilai B21, B22, B6, B31, B32, sudut pengamatan, temperatur, dan indikator termal lainnya. Dalam sistem ini, data difilter untuk Gunung Ibu dan Gunung Lewotolok sebelum disimpan.\par
+\pard\sa240\cf1\b\fs28 Workflow atau Cara Kerja Web\par
+\pard\sa120\cf2\b0\fs22 Workflow sistem dapat dibagi menjadi dua bagian, yaitu proses otomatis di belakang layar dan proses interaksi pengguna pada dashboard.\par
+\pard\sa120\b A. Workflow otomatis di belakang layar\b0\par
+\pard\li360\sa60 1. Worker dijalankan sebagai service terpisah dan membaca konfigurasi interval pengambilan data.\par
+\pard\li360\sa60 2. Worker menentukan tanggal yang perlu diperiksa dan mengirim request ke server MODIS untuk setiap gunung.\par
+\pard\li360\sa60 3. Data yang diterima diperiksa formatnya, lalu koordinatnya dibandingkan dengan batas area gunung.\par
+\pard\li360\sa60 4. Data yang valid disimpan ke tabel modis_data. Data yang sudah pernah masuk tidak disimpan ulang.\par
+\pard\li360\sa60 5. Setiap proses dicatat ke collection_runs dengan status success, no_data, atau failed.\par
+\pard\li360\sa60 6. Sistem menghitung ulang effusion rate, heat flux, volume interval, dan volume kumulatif.\par
+\pard\li360\sa60 7. Hasil perhitungan disimpan ke lava_volume_calculations.\par
+\pard\li360\sa120 8. Worker memperbarui statusnya menjadi waiting dan menunggu jadwal pengambilan berikutnya.\par
+\pard\li0\sa120\b B. Workflow pengguna pada web\b0\par
+\pard\li360\sa60 1. Pengguna membuka dashboard melalui browser.\par
+\pard\li360\sa60 2. Frontend React meminta data terbaru ke endpoint API Flask.\par
+\pard\li360\sa60 3. Backend Flask mengambil data dari MySQL dan mengirimkannya dalam format JSON.\par
+\pard\li360\sa60 4. Frontend menampilkan ringkasan data, grafik, dan pilihan filter.\par
+\pard\li360\sa60 5. Pengguna memilih gunung dan periode pengamatan, lalu menekan tombol Tampilkan data.\par
+\pard\li360\sa60 6. Frontend menyaring data sesuai pilihan pengguna dan memperbarui grafik serta tabel.\par
+\pard\li360\sa60 7. Pengguna dapat membuka detail perhitungan atau mengunduh data dalam format CSV.\par
+\pard\li0\sa120\b Kalimat penjelasan workflow\b0\par
+\pard\sa120 Secara sederhana, worker bertugas mengambil dan mengolah data, database bertugas menyimpan data, backend bertugas menyediakan data melalui API, dan frontend bertugas menyajikan data kepada pengguna. Browser tidak mengambil data MODIS secara langsung; browser hanya berkomunikasi dengan backend.\par
+\pard\sa240\cf1\b\fs28 6. Perhitungan\par
+\pard\sa120\cf2\b0\fs22 Perhitungan menggunakan jumlah radiansi Band 21 pada satu waktu pengamatan. Nilai tersebut digunakan untuk menghitung dua pendekatan effusion rate:\par
+\pard\qc\f1\fs21 Ecold = 0.450 x R - 0.127\par
+\pard\qc\f1\fs21 Ehot  = 0.164 x R - 0.045\par
+\pard\ql\f0\fs22\sa120 Setelah itu sistem menghitung heat flux dengan mengalikan effusion rate dengan konstanta energi panas. Volume per interval dihitung dari effusion rate pengamatan sebelumnya dikalikan selisih waktu antarobservasi.\par
+\pard\qc\f1\fs21 Vcold(i) = Ecold(i-1) x delta waktu(i)\par
+\pard\qc\f1\fs21 Vhot(i)  = Ehot(i-1) x delta waktu(i)\par
+\pard\ql\f0\fs22\sa120 Nilai volume setiap interval kemudian dijumlahkan menjadi volume kumulatif. MeanE digunakan sebagai nilai rata-rata antara estimasi cold dan hot untuk membantu membaca tren grafik.\par
+\pard\sa240\cf1\b\fs28 7. Penjelasan Halaman Web\par
+\pard\sa120\cf2\b\b Dashboard\b0\par
+\pard\sa120 Pengguna dapat memilih gunung, tanggal mulai, dan tanggal akhir. Setelah filter diterapkan, sistem menampilkan grafik estimasi effusion rate lava. Pengguna juga dapat melihat data MODIS, membuka detail perhitungan, dan mengunduh data dalam format CSV.\par
+\pard\sa120\b Monitoring\b0\par
+\pard\sa120 Halaman monitoring menampilkan status worker, jadwal pengambilan berikutnya, proses terakhir, jumlah data MODIS, jumlah proses berhasil, jumlah proses gagal, status tiap gunung, dan riwayat collector.\par
+\pard\sa120\b Detail Perhitungan\b0\par
+\pard\sa120 Halaman ini menampilkan hasil perhitungan secara rinci, seperti B21, effusion rate cold dan hot, heat flux, delta waktu, volume kumulatif, dan MeanE.\par
+\pard\sa120\b Grafik\b0\par
+\pard\sa120 Grafik menampilkan Ecold, Ehot, MeanE, rentang estimasi, serta garis linear fitting untuk membantu melihat kecenderungan data. Grafik dapat dilihat secara interaktif dan diunduh sebagai PNG.\par
+\pard\sa240\cf1\b\fs28 8. Penjelasan Worker\par
+\pard\sa120\cf2\b0\fs22 Worker berjalan terpisah dari browser. Pada setiap siklus, worker membaca tanggal terakhir yang sudah diproses, mengambil data yang diperlukan, memfilter data, menyimpan data baru, mencegah duplikasi, menghitung ulang volume lava, mencatat status proses, kemudian menunggu jadwal berikutnya.\par
+\pard\sa120 Karena worker merupakan service terpisah, proses pengambilan data tetap dapat berjalan walaupun browser dashboard ditutup.\par
+\pard\sa240\cf1\b\fs28 9. Progress yang Telah Dicapai\par
+\pard\sa120\cf2\b0\fs22 Komponen utama sistem sudah terhubung. Backend sudah memiliki worker berkala, API Flask, pencatatan collection runs, dan status worker. Database sudah menyimpan data MODIS, data gunung, riwayat collector, status worker, dan hasil perhitungan.\par
+\pard\sa120 Pada frontend sudah tersedia dashboard, halaman monitoring, tabel data, grafik estimasi, filter periode, dan ekspor CSV. Dengan demikian, alur dari pengambilan data sampai visualisasi sudah berjalan secara terintegrasi.\par
+\pard\sa240\cf1\b\fs28 10. Kendala\par
+\pard\sa120\cf2\b0\fs22 Kendala utama adalah ketersediaan server sumber data MODIS. Saat server tidak dapat diakses, worker tidak dapat mengambil data baru. Sistem tetap mencatat proses tersebut sebagai gagal atau tidak ada data dan menampilkannya di halaman monitoring.\par
+\pard\sa120 Selain itu, bagian linear fitting pada grafik masih perlu disempurnakan agar garis tren lebih sesuai dengan pola seluruh data pengamatan.\par
+\pard\sa240\cf1\b\fs28 11. Target Berikutnya\par
+\pard\sa120\cf2\b0\fs22 Target pengembangan berikutnya adalah:\par
+\pard\li360\sa60 1. Menangani kendala koneksi ke server MODIS.\par
+\pard\li360\sa60 2. Menyempurnakan linear fitting pada grafik.\par
+\pard\li360\sa60 3. Menambahkan peta hotspot berdasarkan koordinat data MODIS.\par
+\pard\li360\sa60 4. Melakukan pengujian terhadap data, kalkulasi, refresh, dan ekspor.\par
+\pard\li360\sa120 5. Menyempurnakan dashboard berdasarkan hasil pengujian.\par
+\pard\li0\sa240\cf1\b\fs28 12. Penutup\par
+\pard\sa120\cf2\b0\fs22 Kesimpulannya, sistem ini mengubah data hotspot MODIS yang masih berupa data mentah menjadi informasi pemantauan gunung api yang lebih terstruktur. Proses tersebut dilakukan melalui pengambilan otomatis, penyimpanan database, perhitungan estimasi lava, dan visualisasi dashboard.\par
+\pard\sa360 Terima kasih.\par
+\pard\sa240\cf1\b\fs28 Pertanyaan yang Mungkin Ditanyakan\par
+\pard\sa100\cf2\b Mengapa menggunakan MODIS?\b0\par
+\pard\sa100 Karena MODIS menyediakan data hotspot secara berkala dan dapat digunakan untuk pemantauan gunung api dari jarak jauh.\par
+\pard\sa100\b Apakah hasilnya volume lava sebenarnya?\b0\par
+\pard\sa100 Hasilnya merupakan estimasi berdasarkan data hotspot MODIS dan rumus yang digunakan, bukan pengukuran langsung di lapangan.\par
+\pard\sa100\b Bagaimana mencegah duplikasi?\b0\par
+\pard\sa100 Database menggunakan unique key berdasarkan gunung, waktu, satelit, longitude, dan latitude.\par
+\pard\sa100\b Apakah dashboard harus selalu dibuka?\b0\par
+\pard\sa100 Tidak. Worker berjalan sebagai service terpisah, sedangkan dashboard hanya membaca data dari API.\par
+\pard\sa100\b Apa yang terjadi jika server MODIS mati?\b0\par
+\pard\sa100 Worker mencatat status error atau no data. Data lama tetap tersedia, sedangkan data baru akan masuk setelah sumber data kembali dapat diakses.\par
+}
