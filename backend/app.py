@@ -108,7 +108,7 @@ def get_chart_data(volcanoes):
         )
         energy = fetch_all(
             """
-            SELECT observation_datetime, pixel_count, sum_b21, max_b21,
+            SELECT volcano_id, observation_datetime, delta_seconds, pixel_count, sum_b21, max_b21,
                 effusion_cold, effusion_hot, heat_flux_cold, heat_flux_hot,
                 cumulative_cold, cumulative_hot
             FROM lava_volume_calculations
@@ -117,6 +117,7 @@ def get_chart_data(volcanoes):
             """,
             (volcano_id,),
         )
+        energy = add_calculation_outputs(energy)
         for row in energy:
             cold = float(row["cumulative_cold"])
             hot = float(row["cumulative_hot"])
