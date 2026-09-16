@@ -95,6 +95,16 @@ def _phase_regressions(x, y):
     return regressions
 
 
+def _combined_envelope(power_cold, power_hot, volume_cold, volume_hot):
+    """Buat satu envelope dari Power dan Volume yang beda orde besarnya."""
+    power_scale = max(float(np.max(np.abs(np.r_[power_cold, power_hot]))), 1.0)
+    volume_scale = max(float(np.max(np.abs(np.r_[volume_cold, volume_hot]))), 1.0)
+    cold_index = (power_cold / power_scale + volume_cold / volume_scale) / 2
+    hot_index = (power_hot / power_scale + volume_hot / volume_scale) / 2
+    return (np.minimum(cold_index, hot_index), np.maximum(cold_index, hot_index),
+            (cold_index + hot_index) / 2, power_scale, volume_scale)
+
+
 def energy_time_series(rows, volcano_name):
     """Plot cumulative power dan volume dengan sumbu terpisah."""
     figure, axis = _figure(f"Cumulative Power & Volume · {volcano_name}", "Cumulative Power (J)")
@@ -105,7 +115,6 @@ def energy_time_series(rows, volcano_name):
     dates = [row["observation_datetime"] for row in rows]
     cold = np.asarray([float(row["cumulative_cold"]) for row in rows])
     hot = np.asarray([float(row["cumulative_hot"]) for row in rows])
-    mean = (cold + hot) / 2
     power_cold = [float(rows[0]["heat_flux_cold"] or 0)]
     power_hot = [float(rows[0]["heat_flux_hot"] or 0)]
     for previous, current in zip(rows, rows[1:]):
@@ -114,26 +123,21 @@ def energy_time_series(rows, volcano_name):
         power_hot.append(power_hot[-1] + float(previous["heat_flux_hot"] or 0) * seconds)
     power_cold = np.asarray(power_cold)
     power_hot = np.asarray(power_hot)
-    power_mean = (power_cold + power_hot) / 2
-    lower, upper = np.minimum(cold, hot), np.maximum(cold, hot)
-    power_lower, power_upper = np.minimum(power_cold, power_hot), np.maximum(power_cold, power_hot)
+    lower, upper, midpoint, power_scale, volume_scale = _combined_envelope(power_cold, power_hot, cold, hot)
     x = mdates.date2num(dates) - mdates.date2num(dates[0])
 
     volume_axis = axis.twinx()
     volume_axis.set_ylabel("Cumulative Volume (m³)", color=MUTED, fontsize=10, labelpad=10)
     volume_axis.tick_params(colors=MUTED, labelsize=8, length=3)
     volume_axis.grid(False)
-    axis.fill_between(dates, power_lower, power_upper, color="#f4a261", alpha=0.18, label="Envelope power")
-    axis.plot(dates, power_cold, color="#e76f51", linewidth=1.8, label="Cumulative power cold")
-    axis.plot(dates, power_hot, color="#c1121f", linewidth=1.8, label="Cumulative power hot")
-    axis.scatter(dates, power_mean, color="#9b2226", edgecolors=BACKGROUND, linewidths=0.7, s=30, zorder=4, label="Mean power")
-    volume_axis.fill_between(dates, lower, upper, color=ENVELOPE, alpha=0.22, label="Envelope volume")
-    volume_axis.plot(dates, cold, color=COLD, linewidth=1.8, label="Cumulative volume cold")
-    volume_axis.plot(dates, hot, color=HOT, linewidth=1.8, label="Cumulative volume hot")
-    volume_axis.scatter(dates, mean, color=MEAN, edgecolors=BACKGROUND, linewidths=0.7, s=30, zorder=4, label="Mean volume")
-    for fit_number, (start, end, coefficients) in enumerate(_phase_regressions(x, mean), 1):
-        volume_axis.plot(dates[start:end], np.polyval(coefficients, x[start:end]), color=MEAN, linewidth=2.2,
-                  label="Gradien/Slope (m³/hari)" if fit_number == 1 else None)
+    axis.set_ylim(0, 1.05)
+    volume_axis.set_ylim(0, 1.05)
+    volume_axis.fill_between(dates, lower, upper, color="#8795dc", alpha=0.30, label="Batas bawah--atas (indeks gabungan)")
+    volume_axis.plot(dates, lower, color="#5b5bd6", linewidth=1.2)
+    volume_axis.plot(dates, upper, color="#c75a88", linewidth=1.2)
+    volume_axis.scatter(dates, midpoint, color=MEAN, edgecolors=BACKGROUND, linewidths=0.7, s=30, zorder=4, label="Titik tengah")
+    axis.yaxis.set_major_formatter(lambda value, _: f"{value * power_scale:.2e}")
+    volume_axis.yaxis.set_major_formatter(lambda value, _: f"{value * volume_scale:.2e}")
 
     axis.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=7))
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m-%Y"))
@@ -182,24 +186,15 @@ def thermal_anomaly_chart(rows, volcano_name):
 
     heat_cold = np.asarray([float(row["heat_flux_cold"] or 0) for row in plot_rows])
     heat_hot = np.asarray([float(row["heat_flux_hot"] or 0) for row in plot_rows])
-    volume_cold = np.asarray([float(row["effusion_cold"] or 0) for row in plot_rows])
-    volume_hot = np.asarray([float(row["effusion_hot"] or 0) for row in plot_rows])
     heat_axis = axes[3]
-    volume_axis = heat_axis.twinx()
     heat_axis.set_title("(d) Heat & Volume Flux", loc="left", fontsize=10, color=TEXT, pad=4,
                         bbox={"facecolor": BACKGROUND, "edgecolor": "#7b8490", "pad": 3})
-    heat_axis.plot(dates, heat_cold, "o--", color="#d62728", markersize=4, linewidth=1, label="Qcold / Heat Flux cold (W)")
-    heat_axis.plot(dates, heat_hot, "o--", color="#d62728", markersize=4, linewidth=1, alpha=0.65, label="Qhot / Heat Flux hot (W)")
-    volume_axis.plot(dates, volume_cold, "o--", color="#1f77b4", markersize=4, linewidth=1, label="Ecold / Volume Flux cold (m³/s)")
-    volume_axis.plot(dates, volume_hot, "o--", color="#1f77b4", markersize=4, linewidth=1, alpha=0.65, label="Ehot / Volume Flux hot (m³/s)")
+    heat_axis.plot(dates, heat_cold, "o--", color="#1f77b4", markersize=4, linewidth=1, label="Qcold / Heat Flux cold (W)")
+    heat_axis.plot(dates, heat_hot, "o--", color="#d62728", markersize=4, linewidth=1, label="Qhot / Heat Flux hot (W)")
     heat_axis.set_ylabel("Heat Flux (W)", color=MUTED, fontsize=9)
-    volume_axis.set_ylabel("Volume Flux (m³/s)", color=MUTED, fontsize=9)
     heat_axis.set_ylim(0, max(6e9, float(max(heat_cold.max(), heat_hot.max())) * 1.08))
-    volume_axis.set_ylim(0, max(6, float(max(volume_cold.max(), volume_hot.max())) * 1.08))
     heat_axis.grid(True, color=GRID, linestyle=":", linewidth=0.8)
-    handles, legend_labels = heat_axis.get_legend_handles_labels()
-    volume_handles, volume_labels = volume_axis.get_legend_handles_labels()
-    heat_axis.legend(handles + volume_handles, legend_labels + volume_labels, fontsize=7, ncol=2, loc="upper right")
+    heat_axis.legend(fontsize=8, ncol=2, loc="upper right")
 
     cold = np.asarray([float(row["cumulative_cold"] or 0) for row in plot_rows])
     hot = np.asarray([float(row["cumulative_hot"] or 0) for row in plot_rows])
@@ -209,23 +204,32 @@ def thermal_anomaly_chart(rows, volcano_name):
     volume_axis = power_axis.twinx()
     power_axis.set_title("(e) Cumulative Power & Volume", loc="left", fontsize=10, color=TEXT, pad=4,
                          bbox={"facecolor": BACKGROUND, "edgecolor": "#7b8490", "pad": 3})
-    power_lower = np.minimum(power_cold, power_hot)
-    power_upper = np.maximum(power_cold, power_hot)
-    power_axis.fill_between(dates, power_lower, power_upper, color="#f4a261", alpha=0.18, label="Envelope power (J)")
-    power_axis.plot(dates, power_cold, color="#e76f51", linewidth=1.2, label="Cumulative power cold (J)")
-    power_axis.plot(dates, power_hot, color="#c1121f", linewidth=1.2, label="Cumulative power hot (J)")
-    power_axis.scatter(dates, (power_cold + power_hot) / 2, color="#9b2226", s=22, zorder=4, label="Mean power (J)")
-    volume_lower = np.minimum(cold, hot)
-    volume_upper = np.maximum(cold, hot)
+    lower, upper, midpoint, power_scale, volume_scale = _combined_envelope(power_cold, power_hot, cold, hot)
+    power_axis.set_ylim(0, 1.05)
+    volume_axis.set_ylim(0, 1.05)
+    volume_lower, volume_upper = lower, upper
     volume_axis.fill_between(dates, volume_lower, volume_upper, color="#8795dc", alpha=0.3, label="Cumulative Volume (m³)")
     volume_axis.plot(dates, cold, color=COLD, linewidth=1.2, label="Cumulative volume cold (m³)")
     volume_axis.plot(dates, hot, color=HOT, linewidth=1.2, label="Cumulative volume hot (m³)")
-    volume_axis.scatter(dates, (cold + hot) / 2, color=MEAN, s=22, zorder=4, label="Mean volume (m³)")
+    mean_e = (cold + hot) / 2
+    volume_axis.scatter(dates, mean_e, color=MEAN, s=22, zorder=4, label="Mean E (m³)")
+    volume_axis.scatter(dates, midpoint, color=MEAN, s=22, zorder=5, label="Titik tengah")
+    for phase_index, (start, end, coefficients) in enumerate(_phase_regressions(x, midpoint)):
+        fit_x = x[start:end]
+        fit_y = np.polyval(coefficients, fit_x)
+        volume_axis.plot(dates[start:end], fit_y, color=MEAN, linewidth=2.0,
+                         label="Linear fitting" if phase_index == 0 else None)
+    power_axis.plot(dates, power_cold / power_scale, color="#e76f51", linewidth=1.1,
+                    label="Cumulative Q cold (J)")
+    power_axis.plot(dates, power_hot / power_scale, color="#c1121f", linewidth=1.1,
+                    label="Cumulative Q hot (J)")
+    power_axis.scatter(dates, (power_cold + power_hot) / (2 * power_scale), color="#9b2226",
+                       s=22, zorder=4, label="Mean Q (J)")
+    power_axis.yaxis.set_major_formatter(lambda value, _: f"{value * power_scale:.2e}")
+    volume_axis.yaxis.set_major_formatter(lambda value, _: f"{value * volume_scale:.2e}")
     power_axis.set_ylabel("Cumulative Power (J)", color=MUTED, fontsize=9)
     volume_axis.set_ylabel("Cumulative Volume (m³)", color=MUTED, fontsize=9)
     power_axis.grid(True, color=GRID, linestyle=":", linewidth=0.8)
-    power_axis.legend(loc="upper left", fontsize=8)
-    volume_axis.legend(loc="upper right", fontsize=8)
 
     for axis in axes:
         axis.tick_params(colors=MUTED, labelsize=8, length=3)

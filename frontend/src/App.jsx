@@ -36,6 +36,12 @@ const LAVA_COLUMNS = [
 
 const number = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
 const detailNumber = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 15 });
+function formatSlope(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "-";
+  if (numericValue !== 0 && Math.abs(numericValue) < 0.01) return numericValue.toExponential(4).replace(".", ",");
+  return detailNumber.format(numericValue);
+}
 const today = new Date().toISOString().slice(0, 10);
 
 function downloadCsv(filename, columns, rows) {
@@ -127,6 +133,24 @@ function recalculateFilteredRows(rows) {
   });
 
   return rows.map((row, index) => calculatedRows.get(index) || { ...row, delta_seconds: 0 });
+}
+
+function addCombinedCumulativeIndex(rows) {
+  const powerScale = Math.max(1, ...rows.flatMap((row) => [Number(row.cumulative_q_cold) || 0, Number(row.cumulative_q_hot) || 0]));
+  const volumeScale = Math.max(1, ...rows.flatMap((row) => [Number(row.cumulative_cold) || 0, Number(row.cumulative_hot) || 0]));
+  return {
+    powerScale,
+    volumeScale,
+    rows: rows.map((row) => {
+      const coldIndex = ((Number(row.cumulative_q_cold) || 0) / powerScale + (Number(row.cumulative_cold) || 0) / volumeScale) / 2;
+      const hotIndex = ((Number(row.cumulative_q_hot) || 0) / powerScale + (Number(row.cumulative_hot) || 0) / volumeScale) / 2;
+      return {
+        ...row,
+        combined_envelope: [Math.min(coldIndex, hotIndex), Math.max(coldIndex, hotIndex)],
+        combined_midpoint: (coldIndex + hotIndex) / 2,
+      };
+    }),
+  };
 }
 
 function statusStyle(status) {
@@ -347,18 +371,18 @@ function compactNumber(value) {
   return new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
-function addMeanBestFit(rows) {
+function addMeanBestFit(rows, valueKey = "mean_e", fitPrefix = "mean_e_fit_") {
   const points = rows.map((row, index) => ({
     x: new Date(row.observation_datetime).getTime(),
-    y: Number(row.mean_e),
+    y: Number(row[valueKey]),
     index,
   })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-  if (points.length < 2) return rows.map((row) => ({ ...row, mean_e_fit: null }));
+  if (points.length < 2) return rows.map((row) => ({ ...row, [`${fitPrefix}1`]: null }));
 
   const origin = points[0].x;
   const normalized = points.map((point) => ({ ...point, x: (point.x - origin) / 86400000 }));
   const minimumPoints = 3;
-  if (normalized.length < minimumPoints) return rows.map((row) => ({ ...row, mean_e_fit: null }));
+  if (normalized.length < minimumPoints) return rows.map((row) => ({ ...row, [`${fitPrefix}1`]: null }));
   const scale = Math.max(...normalized.map((point) => point.y)) - Math.min(...normalized.map((point) => point.y)) || 1;
   const scaled = normalized.map((point) => ({ ...point, y: point.y / scale }));
   const cache = new Map();
@@ -404,30 +428,41 @@ function addMeanBestFit(rows) {
 
   return rows.map((row, index) => ({
     ...row,
-    ...Object.fromEntries(fitByIndex.map((values, phaseIndex) => [`mean_e_fit_${phaseIndex + 1}`, values.get(index) ?? null])),
+    ...Object.fromEntries(fitByIndex.map((values, phaseIndex) => [`${fitPrefix}${phaseIndex + 1}`, values.get(index) ?? null])),
+    ...Object.fromEntries(phaseFits.map(({ slope }, phaseIndex) => [`${fitPrefix}slope_${phaseIndex + 1}`, slope * scale])),
   }));
 }
 
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const validDate = label && !Number.isNaN(new Date(label).getTime());
-  const visibleItems = payload.filter((item) => ["pixel_count", "max_b21", "sum_b21", "effusion_cold", "effusion_hot", "heat_flux_cold", "heat_flux_hot", "volume_envelope", "cumulative_cold", "cumulative_hot", "mean_e", "power_envelope", "cumulative_q_cold", "cumulative_q_hot", "mean_q"].includes(item.dataKey) || String(item.dataKey).startsWith("mean_e_fit_"));
+  const row = payload[0]?.payload || {};
+  const details = [
+    ["Ecold", row.effusion_cold, "m³/s"], ["Ehot", row.effusion_hot, "m³/s"], ["Mean E kumulatif", row.mean_e, "m³"],
+    ["Qcold", row.heat_flux_cold, "W"], ["Qhot", row.heat_flux_hot, "W"], ["Mean Q kumulatif", row.mean_q, "J"],
+  ].filter(([, value]) => Number.isFinite(Number(value)));
+  const fitItems = Object.entries(row).filter(([key, value]) => key.startsWith("combined_fit_slope_") && Number.isFinite(Number(value)));
   return (
     <div className="rounded-xl border border-line bg-white p-3 text-xs shadow-lg">
       <p className="mb-2 font-medium text-slate-700">{validDate ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Waktu tidak tersedia"}</p>
-      {visibleItems.map((item) => {
-        const values = (Array.isArray(item.value) ? item.value : [item.value]).map(Number).filter(Number.isFinite);
-        if (!values.length || values.some((value) => !Number.isFinite(value))) return null;
-        const value = values.length === 2 ? `${number.format(values[0])} - ${number.format(values[1])}` : number.format(values[0]);
-        return <p key={item.dataKey} style={{ color: item.color }}>{item.name}: {value}</p>;
-      })}
+      <p style={{ color: "#8795dc" }}>Envelope gabungan: {number.format(row.combined_envelope?.[0])} - {number.format(row.combined_envelope?.[1])}</p>
+      <p style={{ color: chartTheme.mean }}>Titik gabungan: {number.format(row.combined_midpoint)}</p>
+      {details.map(([name, value, unit]) => <p key={name}>{name}: {number.format(value)} {unit}</p>)}
+      {fitItems.map(([key, value]) => <p key={key} style={{ color: chartTheme.mean }}>Gradien/Slope fase {key.replace("combined_fit_slope_", "")}: {formatSlope(value)} indeks/hari</p>)}
     </div>
   );
 }
 
 function ChartPanel({ volcano, rows }) {
-  const data = addMeanBestFit((rows || []).filter((row) => Number.isFinite(Number(row.cumulative_cold)) && Number.isFinite(Number(row.cumulative_hot))));
-  const fitKeys = Object.keys(data[0] || {}).filter((key) => key.startsWith("mean_e_fit_"));
+  const sourceRows = (rows || []).filter((row) => Number.isFinite(Number(row.cumulative_cold)) && Number.isFinite(Number(row.cumulative_hot)));
+  const combined = addCombinedCumulativeIndex(sourceRows);
+  const data = addMeanBestFit(combined.rows, "combined_midpoint", "combined_fit_");
+  const fitKeys = Object.keys(data[0] || {}).filter((key) => key.startsWith("combined_fit_") && !key.includes("_slope_"));
+  const fitLabels = fitKeys.map((key, index) => {
+    const slope = data[0]?.[`combined_fit_slope_${index + 1}`];
+    return { key, name: `Linear fitting fase ${index + 1}${Number.isFinite(Number(slope)) ? ` · slope ${formatSlope(slope)} indeks/hari` : ""}` };
+  });
+  const slopeSummary = fitLabels.map(({ name }) => name).join(" · ");
 
   return (
     <article className="surface overflow-hidden">
@@ -435,6 +470,7 @@ function ChartPanel({ volcano, rows }) {
         <div>
           <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-cyan" /><h3 className="text-sm font-semibold text-slate-950">(e) Cumulative Power &amp; Volume</h3></div>
           <p className="mt-1 pl-3.5 text-[10px] uppercase tracking-[0.12em] text-muted">{volcano.name} · {data.length} titik data</p>
+          {slopeSummary && <p className="mt-2 pl-3.5 text-[11px] font-medium text-slate-600">{slopeSummary}</p>}
         </div>
       </div>
       <div className="h-[330px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
@@ -443,19 +479,14 @@ function ChartPanel({ volcano, rows }) {
             <ComposedChart data={data} margin={{ top: 5, right: 12, left: 34, bottom: 4 }}>
               <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
               <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal pengamatan", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
-              <YAxis yAxisId="power" tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Power (J)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
-              <YAxis yAxisId="volume" orientation="right" tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Volume (m³)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis yAxisId="power" domain={[0, 1.05]} includeHidden tickFormatter={(value) => compactNumber(value * combined.powerScale)} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Power (J)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis yAxisId="volume" orientation="right" domain={[0, 1.05]} includeHidden tickFormatter={(value) => compactNumber(value * combined.volumeScale)} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Volume (m³)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
               <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
               <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
-              <Area yAxisId="volume" type="monotone" dataKey="volume_envelope" name="Envelope volume (m³)" stroke="none" fill={chartTheme.envelope} fillOpacity={0.22} activeDot={false} />
-              <Line yAxisId="volume" type="monotone" dataKey="cumulative_cold" name="Cumulative volume cold (m³)" stroke={chartTheme.cold} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
-              <Line yAxisId="volume" type="monotone" dataKey="cumulative_hot" name="Cumulative volume hot (m³)" stroke={chartTheme.hot} strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
-              <Scatter yAxisId="volume" dataKey="mean_e" name="Mean volume (m³)" fill={chartTheme.mean} line={false} shape="circle" />
-              <Area yAxisId="power" type="monotone" dataKey="power_envelope" name="Envelope power (J)" stroke="none" fill="#f4a261" fillOpacity={0.18} activeDot={false} />
-              <Line yAxisId="power" type="monotone" dataKey="cumulative_q_cold" name="Cumulative power cold (J)" stroke="#e76f51" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
-              <Line yAxisId="power" type="monotone" dataKey="cumulative_q_hot" name="Cumulative power hot (J)" stroke="#c1121f" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
-              <Scatter yAxisId="power" dataKey="mean_q" name="Mean power (J)" fill="#9b2226" line={false} shape="circle" />
-              {fitKeys.map((key, index) => <Line yAxisId="volume" key={key} type="linear" dataKey={key} name={`Gradien/Slope fase ${index + 1} (m³/hari)`} stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} connectNulls />)}
+              <Area yAxisId="power" type="monotone" dataKey="combined_envelope" name="Envelope gabungan (batas bawah--atas)" stroke="none" fill="#8795dc" fillOpacity={0.30} activeDot={false} />
+              <Scatter yAxisId="power" dataKey="combined_midpoint" name="Titik gabungan" fill={chartTheme.mean} line={false} shape="circle" />
+              {fitLabels.map(({ key, name }) => <Line yAxisId="power" key={key} type="linear" dataKey={key} name={name} stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} connectNulls />)}
+              <Line yAxisId="volume" dataKey="combined_midpoint" hide legendType="none" />
             </ComposedChart>
           </ResponsiveContainer>
         ) : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
@@ -501,17 +532,16 @@ function FluxChart({ volcano, rows }) {
       </div>
       <div className="h-[300px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
         {rows.length ? <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} margin={{ top: 5, right: 42, left: 42, bottom: 4 }}>
+          <ComposedChart data={rows} margin={{ top: 5, right: 12, left: 42, bottom: 4 }}>
             <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
             <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
-            <YAxis yAxisId="heat" tickFormatter={compactNumber} stroke="#d62828" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Heat Flux (W)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
-            <YAxis yAxisId="volume" orientation="right" tickFormatter={compactNumber} stroke="#1565c0" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Volume Flux (m³/s)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Heat Flux (W)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
             <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
             <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
-            <Scatter yAxisId="heat" dataKey="heat_flux_cold" name="Qcold / Heat Flux cold (W)" fill="#1565c0" line={{ stroke: "#1565c0", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
-            <Scatter yAxisId="heat" dataKey="heat_flux_hot" name="Qhot / Heat Flux hot (W)" fill="#d62828" line={{ stroke: "#d62828", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
-            <Scatter yAxisId="volume" dataKey="effusion_cold" name="Ecold / Volume Flux cold (m³/s)" fill="#1565c0" line={{ stroke: "#1565c0", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
-            <Scatter yAxisId="volume" dataKey="effusion_hot" name="Ehot / Volume Flux hot (m³/s)" fill="#d62828" line={{ stroke: "#d62828", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+            <Scatter dataKey="heat_flux_cold" name="Qcold / Heat Flux cold (W)" fill="#1565c0" line={{ stroke: "#1565c0", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+            <Scatter dataKey="heat_flux_hot" name="Qhot / Heat Flux hot (W)" fill="#d62828" line={{ stroke: "#d62828", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+            <Scatter dataKey="effusion_cold" name="Ecold / Volume Flux cold (m³/s)" fill="#1565c0" fillOpacity={0} stroke="none" line={false} shape="circle" legendType="none" />
+            <Scatter dataKey="effusion_hot" name="Ehot / Volume Flux hot (m³/s)" fill="#d62828" fillOpacity={0} stroke="none" line={false} shape="circle" legendType="none" />
           </ComposedChart>
         </ResponsiveContainer> : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
       </div>
