@@ -213,25 +213,14 @@ def thermal_anomaly_chart(rows, volcano_name):
     lower, upper, midpoint, power_scale, volume_scale = _combined_envelope(power_cold, power_hot, cold, hot)
     power_axis.set_ylim(0, 1.05)
     volume_axis.set_ylim(0, 1.05)
-    volume_lower, volume_upper = lower, upper
-    volume_axis.fill_between(dates, volume_lower, volume_upper, color="#8795dc", alpha=0.3, label="Cumulative Volume (m³)")
-    volume_axis.plot(dates, cold, color=COLD, linewidth=1.2, label="Cumulative volume cold (m³)")
-    volume_axis.plot(dates, hot, color=HOT, linewidth=1.2, label="Cumulative volume hot (m³)")
-    mean_e = (cold + hot) / 2
-    volume_axis.scatter(dates, mean_e, color=MEAN, s=22, zorder=4, label="Mean E (m³)")
-    volume_axis.scatter(dates, midpoint, color=MEAN, s=22, zorder=5, label="Titik tengah")
+    volume_axis.fill_between(dates, lower, upper, color="#8795dc", alpha=0.3, label="Envelope gabungan (batas bawah--atas)")
+    volume_axis.scatter(dates, midpoint, color=MEAN, s=22, zorder=5, label="Titik gabungan")
     # Dua observasi pertama tidak dipakai agar slope awal tidak bias titik mulai.
     for phase_index, (start, end, coefficients) in enumerate(_phase_regressions(x[2:], midpoint[2:])):
         fit_x = x[2:][start:end]
         fit_y = np.polyval(coefficients, fit_x)
         volume_axis.plot(dates[2:][start:end], fit_y, color="#7c3aed", linewidth=3.0,
-                         zorder=7, label="Linear fitting (mulai titik ke-3)" if phase_index == 0 else None)
-    power_axis.plot(dates, power_cold / power_scale, color="#e76f51", linewidth=1.1,
-                    label="Cumulative Q cold (J)")
-    power_axis.plot(dates, power_hot / power_scale, color="#c1121f", linewidth=1.1,
-                    label="Cumulative Q hot (J)")
-    power_axis.scatter(dates, (power_cold + power_hot) / (2 * power_scale), color="#9b2226",
-                       s=22, zorder=4, label="Mean Q (J)")
+                         zorder=7, label="Linear fitting fase 1" if phase_index == 0 else None)
     power_axis.yaxis.set_major_formatter(lambda value, _: f"{value * power_scale:.2e}")
     volume_axis.yaxis.set_major_formatter(lambda value, _: f"{value * volume_scale:.2e}")
     power_axis.set_ylabel("Cumulative Power (J)", color=MUTED, fontsize=9)
