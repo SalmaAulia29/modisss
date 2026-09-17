@@ -455,6 +455,19 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
+function ValueTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const validDate = label && !Number.isNaN(new Date(label).getTime());
+  const items = payload.filter((entry) => Number.isFinite(Number(entry.value)));
+  if (!items.length) return null;
+  return (
+    <div className="rounded-xl border border-line bg-white p-3 text-xs shadow-lg">
+      <p className="mb-2 font-medium text-slate-700">{validDate ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Waktu tidak tersedia"}</p>
+      {items.map((entry) => <p key={entry.dataKey || entry.name} style={{ color: entry.color || chartTheme.mean }}>{entry.name}: {number.format(Number(entry.value))}</p>)}
+    </div>
+  );
+}
+
 function FluxTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload || {};
@@ -526,7 +539,7 @@ function ObservationChart({ volcano, rows, config }) {
             <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
             <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
             <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: config.axis, angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
-            <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
+            <Tooltip content={<ValueTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
             <Scatter dataKey={config.key} name={`${config.label} (${config.unit})`} fill={config.color} line={{ stroke: config.color, strokeWidth: 0.7, strokeDasharray: "2 3" }} shape="circle" />
           </ComposedChart>
         </ResponsiveContainer> : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
