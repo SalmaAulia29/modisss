@@ -377,10 +377,12 @@ function addMeanBestFit(rows, valueKey = "mean_e", fitPrefix = "mean_e_fit_") {
     y: Number(row[valueKey]),
     index,
   })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-  if (points.length < 2) return rows.map((row) => ({ ...row, [`${fitPrefix}1`]: null }));
+  // Fitting sengaja dimulai observasi ke-3 agar titik awal tidak membuat slope terlalu tajam.
+  if (points.length < 5) return rows.map((row) => ({ ...row, [`${fitPrefix}1`]: null }));
 
-  const origin = points[0].x;
-  const normalized = points.map((point) => ({ ...point, x: (point.x - origin) / 86400000 }));
+  const fitPoints = points.slice(2);
+  const origin = fitPoints[0].x;
+  const normalized = fitPoints.map((point) => ({ ...point, x: (point.x - origin) / 86400000 }));
   const minimumPoints = 3;
   if (normalized.length < minimumPoints) return rows.map((row) => ({ ...row, [`${fitPrefix}1`]: null }));
   const scale = Math.max(...normalized.map((point) => point.y)) - Math.min(...normalized.map((point) => point.y)) || 1;
@@ -438,8 +440,8 @@ function ChartTooltip({ active, payload, label }) {
   const validDate = label && !Number.isNaN(new Date(label).getTime());
   const row = payload[0]?.payload || {};
   const details = [
-    ["Ecold", row.effusion_cold, "m³/s"], ["Ehot", row.effusion_hot, "m³/s"], ["Mean E kumulatif", row.mean_e, "m³"],
-    ["Qcold", row.heat_flux_cold, "W"], ["Qhot", row.heat_flux_hot, "W"], ["Mean Q kumulatif", row.mean_q, "J"],
+    ["Ecold", row.effusion_cold, "m³/s", "#1565c0"], ["Ehot", row.effusion_hot, "m³/s", "#d62828"], ["Mean E kumulatif", row.mean_e, "m³", chartTheme.mean],
+    ["Qcold", row.heat_flux_cold, "W", "#1565c0"], ["Qhot", row.heat_flux_hot, "W", "#d62828"], ["Mean Q kumulatif", row.mean_q, "J", chartTheme.mean],
   ].filter(([, value]) => Number.isFinite(Number(value)));
   const fitItems = Object.entries(row).filter(([key, value]) => key.startsWith("combined_fit_slope_") && Number.isFinite(Number(value)));
   return (
@@ -447,10 +449,20 @@ function ChartTooltip({ active, payload, label }) {
       <p className="mb-2 font-medium text-slate-700">{validDate ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Waktu tidak tersedia"}</p>
       <p style={{ color: "#8795dc" }}>Envelope gabungan: {number.format(row.combined_envelope?.[0])} - {number.format(row.combined_envelope?.[1])}</p>
       <p style={{ color: chartTheme.mean }}>Titik gabungan: {number.format(row.combined_midpoint)}</p>
-      {details.map(([name, value, unit]) => <p key={name}>{name}: {number.format(value)} {unit}</p>)}
+      {details.map(([name, value, unit, color]) => <p key={name} style={{ color }}>{name}: {number.format(value)} {unit}</p>)}
       {fitItems.map(([key, value]) => <p key={key} style={{ color: chartTheme.mean }}>Gradien/Slope fase {key.replace("combined_fit_slope_", "")}: {formatSlope(value)} indeks/hari</p>)}
     </div>
   );
+}
+
+function FluxTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload || {};
+  const date = label && !Number.isNaN(new Date(label).getTime())
+    ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })
+    : "Waktu tidak tersedia";
+const values = [["Qcold", row.heat_flux_cold, "W", "#1565c0"], ["Qhot", row.heat_flux_hot, "W", "#d62828"], ["Ecold", row.effusion_cold, "m³/s", "#1565c0"], ["Ehot", row.effusion_hot, "m³/s", "#d62828"]];
+  return <div className="rounded-xl border border-line bg-white p-3 text-xs shadow-lg"><p className="mb-2 font-medium text-slate-700">{date}</p>{values.map(([name, value, unit, color]) => <p key={name} style={{ color }}>{name}: {number.format(value)} {unit}</p>)}</div>;
 }
 
 function ChartPanel({ volcano, rows }) {
@@ -485,7 +497,7 @@ function ChartPanel({ volcano, rows }) {
               <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
               <Area yAxisId="power" type="monotone" dataKey="combined_envelope" name="Envelope gabungan (batas bawah--atas)" stroke="none" fill="#8795dc" fillOpacity={0.30} activeDot={false} />
               <Scatter yAxisId="power" dataKey="combined_midpoint" name="Titik gabungan" fill={chartTheme.mean} line={false} shape="circle" />
-              {fitLabels.map(({ key, name }) => <Line yAxisId="power" key={key} type="linear" dataKey={key} name={name} stroke={chartTheme.mean} strokeWidth={2.4} dot={false} activeDot={false} connectNulls />)}
+              {fitLabels.map(({ key, name }) => <Line yAxisId="power" key={key} type="linear" dataKey={key} name={name} stroke="#7c3aed" strokeWidth={3} dot={false} activeDot={false} connectNulls />)}
               <Line yAxisId="volume" dataKey="combined_midpoint" hide legendType="none" />
             </ComposedChart>
           </ResponsiveContainer>
@@ -532,16 +544,17 @@ function FluxChart({ volcano, rows }) {
       </div>
       <div className="h-[300px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
         {rows.length ? <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} margin={{ top: 5, right: 12, left: 42, bottom: 4 }}>
+          <ComposedChart data={rows} margin={{ top: 5, right: 42, left: 42, bottom: 4 }}>
             <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
             <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
-            <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Heat Flux (W)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
-            <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
+            <YAxis yAxisId="heat" tickFormatter={compactNumber} stroke="#d62828" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Heat Flux (W)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <YAxis yAxisId="volume" orientation="right" includeHidden tickFormatter={compactNumber} stroke="#1565c0" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Volume Flux (m³/s)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <Tooltip content={<FluxTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
             <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
-            <Scatter dataKey="heat_flux_cold" name="Qcold / Heat Flux cold (W)" fill="#1565c0" line={{ stroke: "#1565c0", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
-            <Scatter dataKey="heat_flux_hot" name="Qhot / Heat Flux hot (W)" fill="#d62828" line={{ stroke: "#d62828", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
-            <Scatter dataKey="effusion_cold" name="Ecold / Volume Flux cold (m³/s)" fill="#1565c0" fillOpacity={0} stroke="none" line={false} shape="circle" legendType="none" />
-            <Scatter dataKey="effusion_hot" name="Ehot / Volume Flux hot (m³/s)" fill="#d62828" fillOpacity={0} stroke="none" line={false} shape="circle" legendType="none" />
+            <Scatter yAxisId="heat" dataKey="heat_flux_cold" name="Qcold / Heat Flux cold (W)" fill="#1565c0" line={{ stroke: "#1565c0", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+            <Scatter yAxisId="heat" dataKey="heat_flux_hot" name="Qhot / Heat Flux hot (W)" fill="#d62828" line={{ stroke: "#d62828", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
+            <Scatter yAxisId="volume" dataKey="effusion_cold" name="Ecold / Volume Flux cold (m³/s)" fill="#1565c0" fillOpacity={0} stroke="none" line={false} shape="circle" legendType="none" />
+            <Scatter yAxisId="volume" dataKey="effusion_hot" name="Ehot / Volume Flux hot (m³/s)" fill="#d62828" fillOpacity={0} stroke="none" line={false} shape="circle" legendType="none" />
           </ComposedChart>
         </ResponsiveContainer> : <div className="grid h-full place-items-center text-xs text-muted">Belum ada data grafik.</div>}
       </div>

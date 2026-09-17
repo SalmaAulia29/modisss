@@ -186,13 +186,18 @@ def thermal_anomaly_chart(rows, volcano_name):
 
     heat_cold = np.asarray([float(row["heat_flux_cold"] or 0) for row in plot_rows])
     heat_hot = np.asarray([float(row["heat_flux_hot"] or 0) for row in plot_rows])
+    volume_cold = np.asarray([float(row["effusion_cold"] or 0) for row in plot_rows])
+    volume_hot = np.asarray([float(row["effusion_hot"] or 0) for row in plot_rows])
     heat_axis = axes[3]
+    flux_volume_axis = heat_axis.twinx()
     heat_axis.set_title("(d) Heat & Volume Flux", loc="left", fontsize=10, color=TEXT, pad=4,
                         bbox={"facecolor": BACKGROUND, "edgecolor": "#7b8490", "pad": 3})
-    heat_axis.plot(dates, heat_cold, "o--", color="#1f77b4", markersize=4, linewidth=1, label="Qcold / Heat Flux cold (W)")
-    heat_axis.plot(dates, heat_hot, "o--", color="#d62728", markersize=4, linewidth=1, label="Qhot / Heat Flux hot (W)")
+    heat_axis.plot(dates, heat_cold, "o--", color="#1565c0", markersize=4, linewidth=1, label="Qcold / Heat Flux cold (W)")
+    heat_axis.plot(dates, heat_hot, "o--", color="#d62828", markersize=4, linewidth=1, alpha=0.9, label="Qhot / Heat Flux hot (W)")
     heat_axis.set_ylabel("Heat Flux (W)", color=MUTED, fontsize=9)
+    flux_volume_axis.set_ylabel("Volume Flux (m³/s)", color=MUTED, fontsize=9)
     heat_axis.set_ylim(0, max(6e9, float(max(heat_cold.max(), heat_hot.max())) * 1.08))
+    flux_volume_axis.set_ylim(0, max(6, float(max(volume_cold.max(), volume_hot.max())) * 1.08))
     heat_axis.grid(True, color=GRID, linestyle=":", linewidth=0.8)
     heat_axis.legend(fontsize=8, ncol=2, loc="upper right")
 
@@ -200,6 +205,7 @@ def thermal_anomaly_chart(rows, volcano_name):
     hot = np.asarray([float(row["cumulative_hot"] or 0) for row in plot_rows])
     power_cold = np.asarray([float(row.get("cumulative_q_cold") or 0) for row in plot_rows])
     power_hot = np.asarray([float(row.get("cumulative_q_hot") or 0) for row in plot_rows])
+    x = mdates.date2num(dates) - mdates.date2num(dates[0])
     power_axis = axes[4]
     volume_axis = power_axis.twinx()
     power_axis.set_title("(e) Cumulative Power & Volume", loc="left", fontsize=10, color=TEXT, pad=4,
@@ -214,11 +220,12 @@ def thermal_anomaly_chart(rows, volcano_name):
     mean_e = (cold + hot) / 2
     volume_axis.scatter(dates, mean_e, color=MEAN, s=22, zorder=4, label="Mean E (m³)")
     volume_axis.scatter(dates, midpoint, color=MEAN, s=22, zorder=5, label="Titik tengah")
-    for phase_index, (start, end, coefficients) in enumerate(_phase_regressions(x, midpoint)):
-        fit_x = x[start:end]
+    # Dua observasi pertama tidak dipakai agar slope awal tidak bias titik mulai.
+    for phase_index, (start, end, coefficients) in enumerate(_phase_regressions(x[2:], midpoint[2:])):
+        fit_x = x[2:][start:end]
         fit_y = np.polyval(coefficients, fit_x)
-        volume_axis.plot(dates[start:end], fit_y, color=MEAN, linewidth=2.0,
-                         label="Linear fitting" if phase_index == 0 else None)
+        volume_axis.plot(dates[2:][start:end], fit_y, color="#7c3aed", linewidth=3.0,
+                         zorder=7, label="Linear fitting (mulai titik ke-3)" if phase_index == 0 else None)
     power_axis.plot(dates, power_cold / power_scale, color="#e76f51", linewidth=1.1,
                     label="Cumulative Q cold (J)")
     power_axis.plot(dates, power_hot / power_scale, color="#c1121f", linewidth=1.1,
