@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import {
   Area,
   CartesianGrid,
@@ -11,6 +11,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
+const DemHotspot3D = lazy(() => import("./DemHotspot3D"));
 
 const MODIS_COLUMNS = [
   ["ID", "id"], ["Gunung", "volcano_name"], ["UNIX Time", "UNIX_Time"],
@@ -689,6 +691,9 @@ function Dashboard() {
     params.set("volcano", appliedFilters.volcano);
     return `/lava-volume?${params.toString()}#detail-perhitungan`;
   })() : "/lava-volume";
+  const selectedVolcano = appliedFilters
+    ? data.volcanoes.find((volcano) => String(volcano.id) === appliedFilters.volcano)
+    : null;
   return (
     <AppShell page="dashboard" systemOnline={online}>
       <section className="relative overflow-hidden rounded-[1.5rem] bg-[#102d35] px-6 py-10 text-white shadow-[0_20px_50px_rgba(16,45,53,0.2)] sm:px-10 lg:px-14 lg:py-14">
@@ -698,6 +703,11 @@ function Dashboard() {
       </section>
       <DashboardFilter volcanoes={data.volcanoes} values={filters} onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} onSubmit={applyFilters} />
       {appliedFilters && <>
+        {selectedVolcano && (
+          <Suspense fallback={<div className="surface mt-10 grid h-40 place-items-center text-sm text-muted"><span className="mr-3 h-4 w-4 animate-spin rounded-full border-2 border-cyan border-t-transparent" />Memuat peta 3D…</div>}>
+            <DemHotspot3D volcano={selectedVolcano} filters={appliedFilters} />
+          </Suspense>
+        )}
         <section id="mean-e" className="mt-10 scroll-mt-6"><SectionTitle title="Hasil pengamatan" subtitle={`${appliedFilters.startDate} sampai ${appliedFilters.endDate} · tekan Enter atau Tampilkan data untuk memperbarui`} action={<span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">● Data terhubung</span>} /><Charts volcanoes={data.volcanoes} chartData={data.chart_data} filters={appliedFilters} /></section>
         <section className="mt-10"><SectionTitle title="Akses data" subtitle="Buka data pendukung sesuai kebutuhan analisis" /><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><ActionCard icon="database" title="Lihat data MODIS" description={`${selectedRows.length} baris pada periode terpilih`} onClick={() => setActivePanel(activePanel === "modis" ? "" : "modis")} /><ActionCard icon="download" title="Simpan data MODIS" description="Unduh data mentah sebagai CSV" onClick={saveModis} /><ActionCard icon="chart" title="Lihat perhitungan" description="Detail estimasi effusion rate lava" href={calculationUrl} /><ActionCard icon="download" title="Simpan perhitungan" description="Unduh hasil perhitungan sebagai CSV" onClick={saveCalculations} /></div></section>
         {activePanel === "modis" && <section id="data-modis" className="mt-6 scroll-mt-6"><SectionTitle title="Data mentah MODIS" subtitle={`${selectedRows.length} data sesuai filter`} /><DataTable columns={MODIS_COLUMNS} rows={selectedRows} empty="Belum ada data MODIS pada periode ini." /></section>}

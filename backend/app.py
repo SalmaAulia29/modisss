@@ -1,6 +1,7 @@
 """Flask API untuk dashboard monitoring MODIS."""
 
 import os
+import threading
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -8,10 +9,30 @@ from flask import Flask, jsonify, request, send_file
 
 from chart_plot import daily_volume_chart, energy_time_series, thermal_anomaly_chart
 from connect_db import get_connection
+import dem_reader
 from rumus import COLD_HEAT_DENSITY, HOT_HEAT_DENSITY
 
 app = Flask(__name__)
 app.json.sort_keys = False
+
+
+def start_dem_warmup():
+    """Baca DEM di latar belakang agar request pertama tidak terkena timeout."""
+    if os.getenv("DEM_WARM_CACHE", "1") not in ("1", "true", "True", "yes"):
+        return
+
+    def warm():
+        try:
+            loaded = dem_reader.warm_cache()
+            if loaded:
+                app.logger.info("Cache DEM siap: %d file", loaded)
+        except Exception:  # noqa: BLE001 - warm-up tidak boleh menjatuhkan API
+            app.logger.exception("Warm-up cache DEM gagal")
+
+    threading.Thread(target=warm, name="dem-warmup", daemon=True).start()
+
+
+start_dem_warmup()
 
 
 def fetch_all(sql, params=()):
@@ -27,6 +48,26 @@ def fetch_all(sql, params=()):
 def fetch_one(sql, params=()):
     rows = fetch_all(sql, params)
     return rows[0] if rows else None
+
+
+def resolve_volcano(value):
+    """Cari gunung berdasarkan id numerik atau nama (fleksibel)."""
+    value = str(value or "").strip()
+    if not value:
+        return None
+    if value.isdigit():
+        return fetch_one("SELECT id, name FROM volcanoes WHERE id = %s", (int(value),))
+
+    row = fetch_one("SELECT id, name FROM volcanoes WHERE name = %s", (value,))
+    if row:
+        return row
+
+    normalized = value.replace("_", " ").strip().lower()
+    for volcano in fetch_all("SELECT id, name FROM volcanoes"):
+        name = volcano["name"].lower()
+        if name == normalized or name.replace("gunung ", "") == normalized.replace("gunung ", ""):
+            return volcano
+    return None
 
 
 def json_ready(value):
@@ -194,7 +235,7 @@ def index():
     return {
         "name": "MODIS Volcano Monitor API",
         "status": "ok",
-        "endpoints": ["/api/dashboard", "/api/lava-volume", "/health"],
+        "endpoints": ["/api/dashboard", "/api/lava-volume", "/api/dem/<volcano>", "/health"],
     }
 
 
@@ -284,6 +325,112 @@ def api_lava_volume():
             "cold_heat_density": COLD_HEAT_DENSITY,
             "hot_heat_density": HOT_HEAT_DENSITY,
         },
+    }
+    return jsonify(json_ready(payload))
+
+
+@app.get("/api/dem/<volcano>")
+def api_dem(volcano):
+    """Kembalikan grid DEM, hotspot periode terpilih, dan polygon Convex Hull."""
+    volcano_row = resolve_volcano(volcano)
+    if not volcano_row:
+        return {"error": f"Gunung '{volcano}' tidak ditemukan"}, 404
+
+    start_date = request.args.get("start") or None
+    end_date = request.args.get("end") or None
+
+    conditions = ["d.volcano_id = %s"]
+    params = [volcano_row["id"]]
+    if start_date:
+        conditions.append("DATE(d.datetime) >= %s")
+        params.append(start_date)
+    if end_date:
+        conditions.append("DATE(d.datetime) <= %s")
+        params.append(end_date)
+
+    hotspots = fetch_all(
+        f"""
+        SELECT d.id, d.datetime, d.Sat, d.Longitude longitude, d.Latitude latitude,
+            d.B21, d.B22, d.B31, d.B32, d.Temp temp, d.Nti nti,
+            v.name volcano_name
+        FROM modis_data d
+        JOIN volcanoes v ON v.id = d.volcano_id
+        WHERE {' AND '.join(conditions)}
+        ORDER BY d.datetime
+        """,
+        tuple(params),
+    )
+
+    dem_path = dem_reader.find_dem_path(volcano_row["name"])
+    if dem_path is None:
+        return (
+            {
+                "error": f"File DEM untuk {volcano_row['name']} tidak ditemukan",
+                "volcano": volcano_row["name"],
+                "volcano_id": volcano_row["id"],
+                "available_dem_files": dem_reader.available_dem_files(),
+                "hotspots": json_ready(hotspots),
+                "polygon": None,
+            },
+            404,
+        )
+
+    try:
+        grid = dem_reader.load_dem_grid(str(dem_path))
+        elevations = dem_reader.sample_elevations(str(dem_path), hotspots)
+    except dem_reader.DemError as exc:
+        return {"error": str(exc), "volcano": volcano_row["name"]}, 503
+    except Exception as exc:  # pragma: no cover - jaga dashboard tetap hidup
+        app.logger.exception("Gagal memproses DEM %s", dem_path)
+        return {"error": f"Gagal membaca DEM: {exc}", "volcano": volcano_row["name"]}, 500
+
+    enriched = []
+    for hotspot, elevation in zip(hotspots, elevations):
+        item = dict(hotspot)
+        item["elevation"] = elevation
+        enriched.append(item)
+
+    inside = [item for item in enriched if item["elevation"] is not None]
+    polygon = None
+    if len(inside) >= 3:
+        hull = dem_reader.convex_hull(
+            [(item["longitude"], item["latitude"]) for item in inside]
+        )
+        if len(hull) >= 3:
+            elevation_lookup = {
+                (round(item["longitude"], 8), round(item["latitude"], 8)): item["elevation"]
+                for item in inside
+            }
+            polygon = [
+                {
+                    "longitude": point[0],
+                    "latitude": point[1],
+                    "elevation": elevation_lookup.get((round(point[0], 8), round(point[1], 8))),
+                }
+                for point in hull
+            ]
+
+    payload = {
+        "volcano": volcano_row["name"],
+        "volcano_id": volcano_row["id"],
+        "crs": grid["crs"],
+        "bounds": grid["bounds"],
+        "shape": grid["shape"],
+        "source_shape": grid["source_shape"],
+        "downsampled": grid["downsampled"],
+        "nodata": grid["nodata"],
+        "dem_file": grid["filename"],
+        "lon": grid["lon"],
+        "lat": grid["lat"],
+        "elevation": grid["elevation"],
+        "zmin": grid["zmin"],
+        "zmax": grid["zmax"],
+        "offset": grid["offset"],
+        "hotspots": enriched,
+        "polygon": polygon,
+        "hotspot_count": len(enriched),
+        "hotspot_inside_count": len(inside),
+        "period": {"start": start_date, "end": end_date},
     }
     return jsonify(json_ready(payload))
 
