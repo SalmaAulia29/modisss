@@ -50,51 +50,6 @@ def _png_response(figure):
     return output
 
 
-def _phase_regressions(x, y):
-    """Bagi seri menjadi fase dengan slope yang relatif stabil.
-
-    Segmentasi dipilih dengan dynamic programming. Penalti kecil untuk setiap
-    fase mencegah garis baru dibuat kecuali benar-benar menurunkan error fit.
-    """
-    minimum_points = 3
-    if len(y) < minimum_points:
-        return [(0, len(y), np.polyfit(x, y, 1))] if len(y) >= 2 else []
-
-    y_scale = max(float(np.max(y) - np.min(y)), 1.0)
-    normalized_y = y / y_scale
-    cache = {}
-
-    def fit(start, end):
-        key = (start, end)
-        if key not in cache:
-            coefficients = np.polyfit(x[start:end], normalized_y[start:end], 1)
-            residual = normalized_y[start:end] - np.polyval(coefficients, x[start:end])
-            cache[key] = (coefficients, float(np.sum(residual ** 2)))
-        return cache[key]
-
-    costs = [float("inf")] * (len(y) + 1)
-    phases = [[] for _ in range(len(y) + 1)]
-    costs[0] = 0.0
-    penalty = 0.005
-    for end in range(minimum_points, len(y) + 1):
-        for start in range(0, end - minimum_points + 1):
-            if not np.isfinite(costs[start]):
-                continue
-            _, residual = fit(start, end)
-            candidate = costs[start] + residual + penalty
-            if candidate < costs[end]:
-                costs[end] = candidate
-                phases[end] = phases[start] + [start]
-
-    boundaries = phases[-1]
-    regressions = []
-    for phase_number, start in enumerate(boundaries):
-        end = boundaries[phase_number + 1] if phase_number + 1 < len(boundaries) else len(y)
-        coefficients, _ = fit(start, end)
-        regressions.append((start, end, coefficients * np.array([y_scale, y_scale])))
-    return regressions
-
-
 def _combined_envelope(power_cold, power_hot, volume_cold, volume_hot):
     """Buat satu envelope dari Power dan Volume yang beda orde besarnya."""
     power_scale = max(float(np.max(np.abs(np.r_[power_cold, power_hot]))), 1.0)
@@ -201,25 +156,27 @@ def thermal_anomaly_chart(rows, volcano_name):
     heat_axis.grid(True, color=GRID, linestyle=":", linewidth=0.8)
     heat_axis.legend(fontsize=8, ncol=2, loc="upper right")
 
-    cold = np.asarray([float(row["cumulative_cold"] or 0) for row in plot_rows])
-    hot = np.asarray([float(row["cumulative_hot"] or 0) for row in plot_rows])
-    power_cold = np.asarray([float(row.get("cumulative_q_cold") or 0) for row in plot_rows])
-    power_hot = np.asarray([float(row.get("cumulative_q_hot") or 0) for row in plot_rows])
-    x = mdates.date2num(dates) - mdates.date2num(dates[0])
     power_axis = axes[4]
     volume_axis = power_axis.twinx()
     power_axis.set_title("(e) Cumulative Power & Volume", loc="left", fontsize=10, color=TEXT, pad=4,
                          bbox={"facecolor": BACKGROUND, "edgecolor": "#7b8490", "pad": 3})
-    lower, upper, midpoint, power_scale, volume_scale = _combined_envelope(power_cold, power_hot, cold, hot)
+    lower = np.asarray([row["combined_envelope"][0] for row in plot_rows])
+    upper = np.asarray([row["combined_envelope"][1] for row in plot_rows])
+    midpoint = np.asarray([row["combined_midpoint"] for row in plot_rows])
+    power_scale = float(plot_rows[0].get("combined_power_scale") or 1.0)
+    volume_scale = float(plot_rows[0].get("combined_volume_scale") or 1.0)
     power_axis.set_ylim(0, 1.05)
     volume_axis.set_ylim(0, 1.05)
     volume_axis.fill_between(dates, lower, upper, color="#8795dc", alpha=0.3, label="Envelope gabungan (batas bawah--atas)")
     volume_axis.scatter(dates, midpoint, color=MEAN, s=22, zorder=5, label="Titik gabungan")
-    # Dua observasi pertama tidak dipakai agar slope awal tidak bias titik mulai.
-    for phase_index, (start, end, coefficients) in enumerate(_phase_regressions(x[2:], midpoint[2:])):
-        fit_x = x[2:][start:end]
-        fit_y = np.polyval(coefficients, fit_x)
-        volume_axis.plot(dates[2:][start:end], fit_y, color="#7c3aed", linewidth=3.0,
+    fit_keys = sorted({
+        key for row in plot_rows for key in row
+        if key.startswith("combined_fit_") and "_slope_" not in key
+    })
+    for phase_index, key in enumerate(fit_keys):
+        fit_dates = [dates[i] for i, row in enumerate(plot_rows) if row.get(key) is not None]
+        fit_values = [row[key] for row in plot_rows if row.get(key) is not None]
+        volume_axis.plot(fit_dates, fit_values, color="#7c3aed", linewidth=3.0,
                          zorder=7, label="Linear fitting fase 1" if phase_index == 0 else None)
     power_axis.yaxis.set_major_formatter(lambda value, _: f"{value * power_scale:.2e}")
     volume_axis.yaxis.set_major_formatter(lambda value, _: f"{value * volume_scale:.2e}")

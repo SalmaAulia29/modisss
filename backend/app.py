@@ -9,6 +9,7 @@ from flask import Flask, jsonify, request, send_file
 
 from chart_plot import daily_volume_chart, energy_time_series, thermal_anomaly_chart
 from connect_db import get_connection
+import analysis
 import dem_reader
 from rumus import COLD_HEAT_DENSITY, HOT_HEAT_DENSITY
 
@@ -131,7 +132,7 @@ def get_volcanoes():
     )
 
 
-def get_chart_data(volcanoes):
+def get_chart_data(volcanoes, start_date=None, end_date=None):
     """Siapkan seri numerik untuk grafik interaktif React."""
     series = {}
     for volcano in volcanoes:
@@ -147,87 +148,35 @@ def get_chart_data(volcanoes):
             """,
             (volcano_id,),
         )
+        period_filter, period_params = _period_filter(start_date, end_date)
         energy = fetch_all(
             """
             SELECT volcano_id, observation_datetime, delta_seconds, pixel_count, sum_b21, max_b21,
                 effusion_cold, effusion_hot, heat_flux_cold, heat_flux_hot,
                 cumulative_cold, cumulative_hot
             FROM lava_volume_calculations
-            WHERE volcano_id = %s
+            WHERE %s
             ORDER BY observation_datetime
-            """,
-            (volcano_id,),
+            """
+            % ("volcano_id = %s" + period_filter,),
+            (volcano_id, *period_params),
         )
-        energy = add_calculation_outputs(energy)
-        for row in energy:
-            cold = float(row["cumulative_cold"])
-            hot = float(row["cumulative_hot"])
-            row["mean_e"] = (cold + hot) / 2
-            row["envelope"] = [min(cold, hot), max(cold, hot)]
+        energy = analysis.analyze_energy(energy)
         series[str(volcano_id)] = {"daily": daily, "energy": energy}
     return series
 
 
-def add_calculation_outputs(rows):
-    """Tambahkan hasil B1/B3 dalam urutan waktu yang konsisten.
-
-    Untuk setiap baris setelah baris pertama, integrasi memakai nilai baris
-    sebelumnya: hasil sebelumnya + (delta waktu baris ini x nilai sebelumnya).
-    """
-    indexed_rows = list(enumerate(rows))
-    groups = {}
-    for index, row in indexed_rows:
-        groups.setdefault(row["volcano_id"], []).append((index, row))
-
-    calculated = {}
-    for group in groups.values():
-        group.sort(key=lambda item: item[1]["observation_datetime"])
-        block1_e_cold = block1_e_hot = 0.0
-        block1_q_cold = block1_q_hot = 0.0
-        cumulative_cold = cumulative_hot = 0.0
-        cumulative_q_cold = cumulative_q_hot = 0.0
-
-        for position, (index, original_row) in enumerate(group):
-            row = dict(original_row)
-            effusion_cold = float(row["effusion_cold"] or 0)
-            effusion_hot = float(row["effusion_hot"] or 0)
-            heat_cold = float(row["heat_flux_cold"] or 0)
-            heat_hot = float(row["heat_flux_hot"] or 0)
-            delta = int(row["delta_seconds"] or 0)
-
-            block1_e_cold += effusion_cold
-            block1_e_hot += effusion_hot
-            block1_q_cold += heat_cold
-            block1_q_hot += heat_hot
-
-            if position == 0:
-                cumulative_cold = effusion_cold
-                cumulative_hot = effusion_hot
-                cumulative_q_cold = heat_cold
-                cumulative_q_hot = heat_hot
-            else:
-                previous = group[position - 1][1]
-                cumulative_cold += float(previous["effusion_cold"] or 0) * delta
-                cumulative_hot += float(previous["effusion_hot"] or 0) * delta
-                cumulative_q_cold += float(previous["heat_flux_cold"] or 0) * delta
-                cumulative_q_hot += float(previous["heat_flux_hot"] or 0) * delta
-
-            row["cum_e_cold_block1"] = block1_e_cold
-            row["cum_e_hot_block1"] = block1_e_hot
-            row["mean_e_block1"] = (block1_e_cold + block1_e_hot) / 2
-            row["cum_q_cold_block1"] = block1_q_cold
-            row["cum_q_hot_block1"] = block1_q_hot
-            row["mean_q_block1"] = (block1_q_cold + block1_q_hot) / 2
-            row["cumulative_cold"] = cumulative_cold
-            row["cumulative_hot"] = cumulative_hot
-            row["mean_e_block3"] = (cumulative_cold + cumulative_hot) / 2
-            row["mean_e"] = (cumulative_cold + cumulative_hot) / 2
-            row["cumulative_q_cold"] = cumulative_q_cold
-            row["cumulative_q_hot"] = cumulative_q_hot
-            row["mean_q"] = (cumulative_q_cold + cumulative_q_hot) / 2
-            calculated[index] = row
-
-    return [calculated[index] for index in range(len(rows))]
+def _period_filter(start_date, end_date):
+    """Buat klausul SQL + parameter filter periode tanggal (inklusif)."""
+    parts = []
+    params = []
+    if start_date:
+        parts.append("AND DATE(observation_datetime) >= %s")
+        params.append(start_date)
+    if end_date:
+        parts.append("AND DATE(observation_datetime) <= %s")
+        params.append(end_date)
+    return (" " + " ".join(parts)) if parts else "", tuple(params)
 
 
 @app.get("/")
@@ -277,7 +226,11 @@ def api_dashboard():
     volcanoes = get_volcanoes()
     payload = {
         "volcanoes": volcanoes,
-        "chart_data": get_chart_data(volcanoes),
+        "chart_data": get_chart_data(
+            volcanoes,
+            request.args.get("start") or None,
+            request.args.get("end") or None,
+        ),
         "runs": fetch_all(
             "SELECT * FROM collection_runs ORDER BY id DESC LIMIT %s", (run_limit,)
         ),
@@ -309,7 +262,7 @@ def api_lava_volume():
         """
     )
     payload = {
-        "calculations": add_calculation_outputs(fetch_all(
+        "calculations": analysis.add_calculation_outputs(fetch_all(
             """
             SELECT c.*, v.name volcano_name
             FROM lava_volume_calculations c
@@ -489,18 +442,23 @@ def thermal_chart_png(volcano_id):
     volcano = fetch_one("SELECT name FROM volcanoes WHERE id = %s", (volcano_id,))
     if not volcano:
         return {"error": "Gunung tidak ditemukan"}, 404
+    period_filter, period_params = _period_filter(
+        request.args.get("start") or None,
+        request.args.get("end") or None,
+    )
     rows = fetch_all(
         """
         SELECT volcano_id, observation_datetime, delta_seconds, pixel_count, sum_b21, max_b21,
             effusion_cold, effusion_hot, heat_flux_cold, heat_flux_hot,
             cumulative_cold, cumulative_hot
         FROM lava_volume_calculations
-        WHERE volcano_id = %s
+        WHERE %s
         ORDER BY observation_datetime
-        """,
-        (volcano_id,),
+        """
+        % ("volcano_id = %s" + period_filter,),
+        (volcano_id, *period_params),
     )
-    rows = add_calculation_outputs(rows)
+    rows = analysis.analyze_energy(rows)
     return send_file(
         thermal_anomaly_chart(rows, volcano["name"]),
         mimetype="image/png",

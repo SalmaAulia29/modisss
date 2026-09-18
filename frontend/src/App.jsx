@@ -137,24 +137,6 @@ function recalculateFilteredRows(rows) {
   return rows.map((row, index) => calculatedRows.get(index) || { ...row, delta_seconds: 0 });
 }
 
-function addCombinedCumulativeIndex(rows) {
-  const powerScale = Math.max(1, ...rows.flatMap((row) => [Number(row.cumulative_q_cold) || 0, Number(row.cumulative_q_hot) || 0]));
-  const volumeScale = Math.max(1, ...rows.flatMap((row) => [Number(row.cumulative_cold) || 0, Number(row.cumulative_hot) || 0]));
-  return {
-    powerScale,
-    volumeScale,
-    rows: rows.map((row) => {
-      const coldIndex = ((Number(row.cumulative_q_cold) || 0) / powerScale + (Number(row.cumulative_cold) || 0) / volumeScale) / 2;
-      const hotIndex = ((Number(row.cumulative_q_hot) || 0) / powerScale + (Number(row.cumulative_hot) || 0) / volumeScale) / 2;
-      return {
-        ...row,
-        combined_envelope: [Math.min(coldIndex, hotIndex), Math.max(coldIndex, hotIndex)],
-        combined_midpoint: (coldIndex + hotIndex) / 2,
-      };
-    }),
-  };
-}
-
 function statusStyle(status) {
   return {
     success: "border-emerald-500/25 bg-emerald-50 text-emerald-700",
@@ -271,6 +253,7 @@ function useApi(url, initialRefresh = 30) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshSeconds, setRefreshSeconds] = useState(initialRefresh);
+  const [current, setCurrent] = useState(true);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -281,20 +264,22 @@ function useApi(url, initialRefresh = 30) {
       setData(payload);
       setRefreshSeconds(payload.settings?.refresh_seconds || initialRefresh);
       setError("");
+      setCurrent(true);
     } catch (requestError) {
       setError(requestError.message || "Kesalahan jaringan");
+      setCurrent(false);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [url, initialRefresh]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setCurrent(false); load(); }, [load]);
   useEffect(() => {
     const timer = window.setInterval(load, refreshSeconds * 1000);
     return () => window.clearInterval(timer);
   }, [load, refreshSeconds]);
-  return { data, error, loading, refreshing, load };
+  return { data, error, loading, refreshing, current, load };
 }
 
 function Countdown({ worker }) {
@@ -373,70 +358,6 @@ function compactNumber(value) {
   return new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
-function addMeanBestFit(rows, valueKey = "mean_e", fitPrefix = "mean_e_fit_") {
-  const points = rows.map((row, index) => ({
-    x: new Date(row.observation_datetime).getTime(),
-    y: Number(row[valueKey]),
-    index,
-  })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-  // Fitting sengaja dimulai observasi ke-3 agar titik awal tidak membuat slope terlalu tajam.
-  if (points.length < 5) return rows.map((row) => ({ ...row, [`${fitPrefix}1`]: null }));
-
-  const fitPoints = points.slice(2);
-  const origin = fitPoints[0].x;
-  const normalized = fitPoints.map((point) => ({ ...point, x: (point.x - origin) / 86400000 }));
-  const minimumPoints = 3;
-  if (normalized.length < minimumPoints) return rows.map((row) => ({ ...row, [`${fitPrefix}1`]: null }));
-  const scale = Math.max(...normalized.map((point) => point.y)) - Math.min(...normalized.map((point) => point.y)) || 1;
-  const scaled = normalized.map((point) => ({ ...point, y: point.y / scale }));
-  const cache = new Map();
-  const fit = (start, end) => {
-    const key = `${start}:${end}`;
-    if (cache.has(key)) return cache.get(key);
-    const segment = scaled.slice(start, end);
-    const meanX = segment.reduce((sum, point) => sum + point.x, 0) / segment.length;
-    const meanY = segment.reduce((sum, point) => sum + point.y, 0) / segment.length;
-    const denominator = segment.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
-    const slope = denominator ? segment.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator : 0;
-    const intercept = meanY - slope * meanX;
-    const residual = segment.reduce((sum, point) => sum + (point.y - (slope * point.x + intercept)) ** 2, 0);
-    const result = { slope, intercept, residual };
-    cache.set(key, result);
-    return result;
-  };
-  const costs = Array(normalized.length + 1).fill(Number.POSITIVE_INFINITY);
-  const phases = Array.from({ length: normalized.length + 1 }, () => []);
-  costs[0] = 0;
-  const penalty = 0.005;
-  for (let end = minimumPoints; end <= normalized.length; end += 1) {
-    for (let start = 0; start <= end - minimumPoints; start += 1) {
-      if (!Number.isFinite(costs[start])) continue;
-      const candidate = costs[start] + fit(start, end).residual + penalty;
-      if (candidate < costs[end]) {
-        costs[end] = candidate;
-        phases[end] = [...phases[start], start];
-      }
-    }
-  }
-  const phaseFits = phases[normalized.length].map((start, phaseIndex) => {
-    const end = phases[normalized.length][phaseIndex + 1] ?? normalized.length;
-    return { start, end, ...fit(start, end) };
-  });
-  const fitByIndex = phaseFits.map(() => new Map());
-  phaseFits.forEach(({ start, end, slope, intercept }, phaseIndex) => {
-    const first = scaled[start];
-    const last = scaled[end - 1];
-    fitByIndex[phaseIndex].set(first.index, (slope * first.x + intercept) * scale);
-    fitByIndex[phaseIndex].set(last.index, (slope * last.x + intercept) * scale);
-  });
-
-  return rows.map((row, index) => ({
-    ...row,
-    ...Object.fromEntries(fitByIndex.map((values, phaseIndex) => [`${fitPrefix}${phaseIndex + 1}`, values.get(index) ?? null])),
-    ...Object.fromEntries(phaseFits.map(({ slope }, phaseIndex) => [`${fitPrefix}slope_${phaseIndex + 1}`, slope * scale])),
-  }));
-}
-
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const validDate = label && !Number.isNaN(new Date(label).getTime());
@@ -481,9 +402,9 @@ const values = [["Qcold", row.heat_flux_cold, "W", "#1565c0"], ["Qhot", row.heat
 }
 
 function ChartPanel({ volcano, rows }) {
-  const sourceRows = (rows || []).filter((row) => Number.isFinite(Number(row.cumulative_cold)) && Number.isFinite(Number(row.cumulative_hot)));
-  const combined = addCombinedCumulativeIndex(sourceRows);
-  const data = addMeanBestFit(combined.rows, "combined_midpoint", "combined_fit_");
+  const data = (rows || []).filter((row) => Number.isFinite(Number(row.cumulative_cold)) && Number.isFinite(Number(row.cumulative_hot)));
+  const powerScale = data[0]?.combined_power_scale;
+  const volumeScale = data[0]?.combined_volume_scale;
   const fitKeys = Object.keys(data[0] || {}).filter((key) => key.startsWith("combined_fit_") && !key.includes("_slope_"));
   const fitLabels = fitKeys.map((key, index) => {
     const slope = data[0]?.[`combined_fit_slope_${index + 1}`];
@@ -506,8 +427,8 @@ function ChartPanel({ volcano, rows }) {
             <ComposedChart data={data} margin={{ top: 5, right: 12, left: 34, bottom: 4 }}>
               <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
               <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal pengamatan", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
-              <YAxis yAxisId="power" domain={[0, 1.05]} includeHidden tickFormatter={(value) => compactNumber(value * combined.powerScale)} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Power (J)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
-              <YAxis yAxisId="volume" orientation="right" domain={[0, 1.05]} includeHidden tickFormatter={(value) => compactNumber(value * combined.volumeScale)} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Volume (m³)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis yAxisId="power" domain={[0, 1.05]} includeHidden tickFormatter={(value) => compactNumber(value * (powerScale || 1))} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Power (J)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis yAxisId="volume" orientation="right" domain={[0, 1.05]} includeHidden tickFormatter={(value) => compactNumber(value * (volumeScale || 1))} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Volume (m³)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
               <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
               <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
               <Area yAxisId="power" type="monotone" dataKey="combined_envelope" name="Envelope gabungan (batas bawah--atas)" stroke="none" fill="#8795dc" fillOpacity={0.30} activeDot={false} />
@@ -523,12 +444,14 @@ function ChartPanel({ volcano, rows }) {
 }
 
 const observationCharts = [
-  { key: "pixel_count", title: "(a) Jumlah Hotspot Terdeteksi", axis: "Jumlah pixel terdeteksi (pixel)", color: "#202938", unit: "pixel", label: "npixel" },
-  { key: "max_b21", title: "(b) Spectral Radiance Maximum", axis: "B21max (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "B21max" },
-  { key: "sum_b21", title: "(c) Spectral Radiance Total", axis: "Σ B21 (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "Σ B21" },
+  { key: "pixel_count", title: "(a) Jumlah Hotspot Terdeteksi", axis: "Jumlah pixel terdeteksi (pixel)", color: "#202938", unit: "pixel", label: "npixel", yMin: 10 },
+  { key: "max_b21", title: "(b) Spectral Radiance Maximum", axis: "B21max (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "B21max", yMin: 30 },
+  { key: "sum_b21", title: "(c) Spectral Radiance Total", axis: "Σ B21 (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "Σ B21", yMin: 50 },
 ];
 
 function ObservationChart({ volcano, rows, config }) {
+  const maxValue = rows.reduce((max, row) => Math.max(max, Number(row[config.key]) || 0), 0);
+  const yDomain = [0, Math.max(config.yMin, maxValue * 1.08)];
   return (
     <article className="surface overflow-hidden">
       <div className="border-b border-line px-5 py-4">
@@ -540,7 +463,7 @@ function ObservationChart({ volcano, rows, config }) {
           <ComposedChart data={rows} margin={{ top: 5, right: 12, left: 34, bottom: 4 }}>
             <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
             <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
-            <YAxis tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: config.axis, angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <YAxis domain={yDomain} tickFormatter={compactNumber} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: config.axis, angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
             <Tooltip content={<ValueTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
             <Scatter dataKey={config.key} name={`${config.label} (${config.unit})`} fill={config.color} line={{ stroke: config.color, strokeWidth: 0.7, strokeDasharray: "2 3" }} shape="circle" />
           </ComposedChart>
@@ -551,6 +474,10 @@ function ObservationChart({ volcano, rows, config }) {
 }
 
 function FluxChart({ volcano, rows }) {
+  const maxHeat = rows.reduce((max, row) => Math.max(max, Number(row.heat_flux_cold) || 0, Number(row.heat_flux_hot) || 0), 0);
+  const maxVolume = rows.reduce((max, row) => Math.max(max, Number(row.effusion_cold) || 0, Number(row.effusion_hot) || 0), 0);
+  const heatDomain = [0, Math.max(6e9, maxHeat * 1.08)];
+  const volumeDomain = [0, Math.max(6, maxVolume * 1.08)];
   return (
     <article className="surface overflow-hidden xl:col-span-2">
       <div className="border-b border-line px-5 py-4">
@@ -562,8 +489,8 @@ function FluxChart({ volcano, rows }) {
           <ComposedChart data={rows} margin={{ top: 5, right: 42, left: 42, bottom: 4 }}>
             <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
             <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
-            <YAxis yAxisId="heat" tickFormatter={compactNumber} stroke="#d62828" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Heat Flux (W)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
-            <YAxis yAxisId="volume" orientation="right" includeHidden tickFormatter={compactNumber} stroke="#1565c0" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Volume Flux (m³/s)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <YAxis yAxisId="heat" domain={heatDomain} tickFormatter={compactNumber} stroke="#d62828" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Heat Flux (W)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+            <YAxis yAxisId="volume" orientation="right" domain={volumeDomain} includeHidden tickFormatter={compactNumber} stroke="#1565c0" tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={72} label={{ value: "Volume Flux (m³/s)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
             <Tooltip content={<FluxTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
             <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
             <Scatter yAxisId="heat" dataKey="heat_flux_cold" name="Qcold / Heat Flux cold (W)" fill="#1565c0" line={{ stroke: "#1565c0", strokeWidth: 0.8, strokeDasharray: "5 4" }} shape="circle" />
@@ -602,11 +529,12 @@ function AnalysisFilters({ volcanoes, values, onChange }) {
 function Charts({ volcanoes, chartData, dashboard = false, filters }) {
   const activeFilters = filters || { volcano: "", startDate: "", endDate: "" };
   const visibleVolcanoes = volcanoes.filter((volcano) => String(volcano.id) === activeFilters.volcano);
-  const isAfterStart = (row) => !activeFilters.startDate || String(row.observation_datetime).slice(0, 10) >= activeFilters.startDate;
-  const isBeforeEnd = (row) => !activeFilters.endDate || String(row.observation_datetime).slice(0, 10) <= activeFilters.endDate;
-  const filteredChartRows = (volcano) => {
-    const rows = chartData?.[String(volcano.id)]?.energy?.filter((row) => isAfterStart(row) && isBeforeEnd(row)) || [];
-    return recalculateFilteredRows(rows);
+  const filteredChartRows = (volcano) => chartData?.[String(volcano.id)]?.energy || [];
+  const thermalPngUrl = (volcano) => {
+    const params = new URLSearchParams({ download: "1" });
+    if (activeFilters.startDate) params.set("start", activeFilters.startDate);
+    if (activeFilters.endDate) params.set("end", activeFilters.endDate);
+    return `/charts/thermal/${volcano.id}.png?${params.toString()}`;
   };
   return (
     <section className="mt-10">
@@ -617,7 +545,7 @@ function Charts({ volcanoes, chartData, dashboard = false, filters }) {
           return <div className="space-y-4" key={volcano.id}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-950">{volcano.name}</h3>
-              <a href={`/charts/thermal/${volcano.id}.png?download=1`} download className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-700 transition-colors hover:border-cyan/40 hover:text-cyan" title="Unduh seluruh grafik anomali thermal"><Icon name="download" className="h-3.5 w-3.5" />Unduh PNG a-e</a>
+              <a href={thermalPngUrl(volcano)} download className="inline-flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-700 transition-colors hover:border-cyan/40 hover:text-cyan" title="Unduh seluruh grafik anomali thermal"><Icon name="download" className="h-3.5 w-3.5" />Unduh PNG a-e</a>
             </div>
             {observationCharts.map((config) => <ObservationChart volcano={volcano} rows={rows} config={config} key={`${volcano.id}-${config.key}`} />)}
             <FluxChart volcano={volcano} rows={rows} />
@@ -659,10 +587,13 @@ function ActionCard({ icon, title, description, onClick, href, disabled = false 
 }
 
 function Dashboard() {
-  const { data, error, loading, refreshing, load } = useApi("/api/dashboard");
   const [filters, setFilters] = useState({ volcano: "", startDate: "2026-01-01", endDate: today });
   const [appliedFilters, setAppliedFilters] = useState(null);
   const [activePanel, setActivePanel] = useState("");
+  const dashboardUrl = appliedFilters
+    ? `/api/dashboard?start=${encodeURIComponent(appliedFilters.startDate)}&end=${encodeURIComponent(appliedFilters.endDate)}`
+    : "/api/dashboard";
+  const { data, error, loading, refreshing, load, current } = useApi(dashboardUrl);
   if (loading && !data) return <AppShell page="dashboard"><Loading /></AppShell>;
   if (error && !data) return <AppShell page="dashboard" systemOnline={false}><ErrorPanel message={error} retry={load} /></AppShell>;
   const online = !["error", "failed"].includes(data.worker?.status);
@@ -708,7 +639,7 @@ function Dashboard() {
             <DemHotspot3D volcano={selectedVolcano} filters={appliedFilters} />
           </Suspense>
         )}
-        <section id="mean-e" className="mt-10 scroll-mt-6"><SectionTitle title="Hasil pengamatan" subtitle={`${appliedFilters.startDate} sampai ${appliedFilters.endDate} · tekan Enter atau Tampilkan data untuk memperbarui`} action={<span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">● Data terhubung</span>} /><Charts volcanoes={data.volcanoes} chartData={data.chart_data} filters={appliedFilters} /></section>
+        <section id="mean-e" className="mt-10 scroll-mt-6"><SectionTitle title="Hasil pengamatan" subtitle={`${appliedFilters.startDate} sampai ${appliedFilters.endDate} · tekan Enter atau Tampilkan data untuk memperbarui`} action={<span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">● Data terhubung</span>} />{current ? <Charts volcanoes={data.volcanoes} chartData={data.chart_data} filters={appliedFilters} /> : <div className="surface mt-6 grid h-40 place-items-center text-sm text-muted"><span className="mr-3 h-4 w-4 animate-spin rounded-full border-2 border-cyan border-t-transparent" />Memuat data periode terpilih…</div>}</section>
         <section className="mt-10"><SectionTitle title="Akses data" subtitle="Buka data pendukung sesuai kebutuhan analisis" /><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><ActionCard icon="database" title="Lihat data MODIS" description={`${selectedRows.length} baris pada periode terpilih`} onClick={() => setActivePanel(activePanel === "modis" ? "" : "modis")} /><ActionCard icon="download" title="Simpan data MODIS" description="Unduh data mentah sebagai CSV" onClick={saveModis} /><ActionCard icon="chart" title="Lihat perhitungan" description="Detail estimasi effusion rate lava" href={calculationUrl} /><ActionCard icon="download" title="Simpan perhitungan" description="Unduh hasil perhitungan sebagai CSV" onClick={saveCalculations} /></div></section>
         {activePanel === "modis" && <section id="data-modis" className="mt-6 scroll-mt-6"><SectionTitle title="Data mentah MODIS" subtitle={`${selectedRows.length} data sesuai filter`} /><DataTable columns={MODIS_COLUMNS} rows={selectedRows} empty="Belum ada data MODIS pada periode ini." /></section>}
       </>}
