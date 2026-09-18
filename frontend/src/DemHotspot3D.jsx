@@ -35,12 +35,101 @@ function formatNumber(value, digits = 2) {
   return Number.isFinite(numeric) ? number.format(numeric) : "—";
 }
 
+function computeDelaunayEdges(points) {
+  const count = points.length;
+  if (count < 2) return [];
+  if (count === 2) return [[0, 1]];
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  points.forEach((point) => {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  });
+  const extent = Math.max(maxX - minX, maxY - minY) || 1;
+  const midX = (minX + maxX) / 2 - minX;
+  const midY = (minY + maxY) / 2 - minY;
+
+  const vertices = [
+    { x: midX - 20 * extent, y: midY - extent },
+    { x: midX, y: midY + 20 * extent },
+    { x: midX + 20 * extent, y: midY - extent },
+  ];
+  points.forEach((point) => vertices.push({ x: point.x - minX, y: point.y - minY }));
+
+  const orientation = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+
+  const inCircumcircle = (a, b, c, d) => {
+    const adx = a.x - d.x;
+    const ady = a.y - d.y;
+    const bdx = b.x - d.x;
+    const bdy = b.y - d.y;
+    const cdx = c.x - d.x;
+    const cdy = c.y - d.y;
+    const ap = adx * adx + ady * ady;
+    const bp = bdx * bdx + bdy * bdy;
+    const cp = cdx * cdx + cdy * cdy;
+    const determinant =
+      adx * (bdy * cp - bp * cdy) - bdx * (ady * cp - ap * cdy) + cdx * (ady * bp - ap * bdy);
+    const ccw = orientation(a, b, c);
+    return ccw !== 0 && determinant * ccw > 0;
+  };
+
+  let triangles = [[0, 1, 2]];
+
+  for (let vertexIndex = 3; vertexIndex < vertices.length; vertexIndex += 1) {
+    const point = vertices[vertexIndex];
+    const badTriangles = [];
+    triangles.forEach((triangle, index) => {
+      if (inCircumcircle(vertices[triangle[0]], vertices[triangle[1]], vertices[triangle[2]], point)) {
+        badTriangles.push(index);
+      }
+    });
+
+    const edgeCounts = new Map();
+    badTriangles.forEach((index) => {
+      const triangle = triangles[index];
+      [[triangle[0], triangle[1]], [triangle[1], triangle[2]], [triangle[2], triangle[0]]].forEach(
+        ([u, v]) => {
+          const key = u < v ? `${u}|${v}` : `${v}|${u}`;
+          edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+        },
+      );
+    });
+
+    const removed = new Set(badTriangles);
+    triangles = triangles.filter((_, index) => !removed.has(index));
+
+    edgeCounts.forEach((edgeCount, key) => {
+      if (edgeCount !== 1) return;
+      const [u, v] = key.split("|").map(Number);
+      triangles.push([u, v, vertexIndex]);
+    });
+  }
+
+  const edgeSet = new Set();
+  triangles.forEach((triangle) => {
+    if (triangle.some((vertex) => vertex < 3)) return;
+    for (let edge = 0; edge < 3; edge += 1) {
+      const u = triangle[edge] - 3;
+      const v = triangle[(edge + 1) % 3] - 3;
+      const key = u < v ? `${u}|${v}` : `${v}|${u}`;
+      edgeSet.add(key);
+    }
+  });
+
+  return [...edgeSet].map((key) => key.split("|").map(Number));
+}
+
 function buildFigure(payload) {
   const zmin = Number(payload.zmin) || 0;
   const zmax = Number(payload.zmax) || 0;
   const zRange = Math.max(1, zmax - zmin);
   const offset = Number(payload.offset) || Math.max(5, zRange * 0.015);
-  const polygonLift = Math.max(offset * 2.5, 12);
   const traces = [];
 
   traces.push({
@@ -137,6 +226,36 @@ function buildFigure(payload) {
     });
   }
 
+  const pointCoordinates = inside.map((hotspot) => ({
+    x: Number(hotspot.longitude),
+    y: Number(hotspot.latitude),
+  }));
+  const edges = computeDelaunayEdges(pointCoordinates);
+  if (edges.length) {
+    const networkX = [];
+    const networkY = [];
+    const networkZ = [];
+    edges.forEach(([start, end]) => {
+      networkX.push(inside[start].longitude, inside[end].longitude, null);
+      networkY.push(inside[start].latitude, inside[end].latitude, null);
+      networkZ.push(
+        Number(inside[start].elevation) + offset,
+        Number(inside[end].elevation) + offset,
+        null,
+      );
+    });
+    traces.push({
+      type: "scatter3d",
+      mode: "lines",
+      name: "Jaringan triangulasi hotspot",
+      x: networkX,
+      y: networkY,
+      z: networkZ,
+      line: { color: "#ffffff", width: 1.3 },
+      hoverinfo: "skip",
+    });
+  }
+
   const polygon = Array.isArray(payload.polygon) ? payload.polygon : [];
   if (polygon.length === 1) {
     const point = polygon[0];
@@ -151,45 +270,20 @@ function buildFigure(payload) {
       hoverinfo: "skip",
     });
   } else if (polygon.length >= 2) {
-    const polygonZ = (point) => Number(point.elevation) + polygonLift;
+    const polygonZ = polygon.map((point) => Number(point.elevation) + offset);
     const polygonX = polygon.map((point) => point.longitude);
     const polygonY = polygon.map((point) => point.latitude);
-    const polygonElevation = polygon.map(polygonZ);
-
-    if (polygon.length >= 3) {
-      const indices = { i: [], j: [], k: [] };
-      for (let vertex = 1; vertex < polygon.length - 1; vertex += 1) {
-        indices.i.push(0);
-        indices.j.push(vertex);
-        indices.k.push(vertex + 1);
-      }
-      traces.push({
-        type: "mesh3d",
-        name: "Polygon hotspot (Convex Hull)",
-        x: polygonX,
-        y: polygonY,
-        z: polygonElevation,
-        i: indices.i,
-        j: indices.j,
-        k: indices.k,
-        color: "#dc2626",
-        opacity: 0.38,
-        flatshading: true,
-        hoverinfo: "skip",
-      });
-    }
-
     const closed = polygon.length >= 3;
     traces.push({
       type: "scatter3d",
       mode: "lines",
-      name: closed ? "Batas polygon hotspot" : "Garis penghubung hotspot",
+      name: "Batas Convex Hull",
       x: closed ? [...polygonX, polygonX[0]] : polygonX,
       y: closed ? [...polygonY, polygonY[0]] : polygonY,
-      z: closed ? [...polygonElevation, polygonElevation[0]] : polygonElevation,
-      line: { color: "#d62828", width: closed ? 6 : 6 },
+      z: closed ? [...polygonZ, polygonZ[0]] : polygonZ,
+      line: { color: "#d62828", width: 2.5, dash: closed ? "dash" : "solid" },
       hoverinfo: "skip",
-      showlegend: !closed,
+      showlegend: closed,
     });
   }
 
