@@ -143,10 +143,14 @@ function buildFigure(payload) {
     colorscale: DEM_COLORSCALE,
     showscale: true,
     colorbar: {
-      title: { text: "Elevasi (m)", side: "right" },
-      thickness: 12,
-      len: 0.5,
-      x: 0.99,
+      title: { text: "Elevasi (m)", side: "top" },
+      orientation: "h",
+      thickness: 14,
+      len: 0.6,
+      x: 0.5,
+      xanchor: "center",
+      y: -0.15,
+      yanchor: "top",
       tickfont: { size: 9 },
     },
     hovertemplate:
@@ -290,7 +294,7 @@ function buildFigure(payload) {
   const layout = {
     autosize: true,
     height: PLOT_HEIGHT,
-    margin: { l: 0, r: 0, t: 8, b: 0 },
+    margin: { l: 0, r: 0, t: 8, b: 160 },
     paper_bgcolor: "rgba(0,0,0,0)",
     font: { family: "Inter, system-ui, sans-serif", size: 11, color: "#617287" },
     showlegend: true,
