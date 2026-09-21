@@ -1,6 +1,7 @@
 """Pembuatan grafik API MODIS menggunakan Matplotlib."""
 
 from io import BytesIO
+import math
 
 import matplotlib
 
@@ -18,6 +19,21 @@ COLD = "#3498db"
 HOT = "#ff7f0e"
 MEAN = "#202938"
 ENVELOPE = "#94a3b8"
+
+
+def _finite_max(values):
+    """Maksimum nilai yang berhingga; abaikan NaN/Inf. 0 jika tidak ada."""
+    values = np.asarray(values, dtype=float)
+    finite = values[np.isfinite(values)]
+    return float(finite.max()) if finite.size else 0.0
+
+
+def _adaptive_upper(value):
+    """Batas atas Y-axis adaptif (nilai aktual + padding 10%)."""
+    value = float(value)
+    if not math.isfinite(value) or value <= 0:
+        return 1.0
+    return value * 1.1
 
 
 def _figure(title, y_label):
@@ -125,18 +141,18 @@ def thermal_anomaly_chart(rows, volcano_name):
 
     dates = [row["observation_datetime"] for row in plot_rows]
     panel_values = [
-        ("(a) Jumlah Hotspot Terdeteksi", "pixel_count", "No. Hot Pixels Detected", 10),
-        ("(b) Spectral Radiance Maximum", "max_b21", "B21max (W/m² sr µm)", 30),
-        ("(c) Spectral Radiance Total", "sum_b21", "Σ B21 (W/m² sr µm)", 50),
+        ("(a) Jumlah Hotspot Terdeteksi", "pixel_count", "No. Hot Pixels Detected"),
+        ("(b) Spectral Radiance Maximum", "max_b21", "B21max (W/m² sr µm)"),
+        ("(c) Spectral Radiance Total", "sum_b21", "Σ B21 (W/m² sr µm)"),
     ]
-    for axis, (title, field, y_label, y_max) in zip(axes[:3], panel_values):
+    for axis, (title, field, y_label) in zip(axes[:3], panel_values):
         values = np.asarray([float(row[field] or 0) for row in plot_rows])
         axis.scatter(dates, values, color="#111111", edgecolors="#111111", linewidths=0.4, s=28, alpha=0.75)
         axis.vlines(dates, 0, values, color="#777777", alpha=0.5, linewidth=0.8)
         axis.set_title(title, loc="left", fontsize=10, color=TEXT, pad=4,
                        bbox={"facecolor": BACKGROUND, "edgecolor": "#7b8490", "pad": 3})
         axis.set_ylabel(y_label, color=MUTED, fontsize=9)
-        axis.set_ylim(0, max(y_max, float(values.max()) * 1.08))
+        axis.set_ylim(0, _adaptive_upper(_finite_max(values)))
         axis.grid(True, color=GRID, linestyle=":", linewidth=0.8)
 
     heat_cold = np.asarray([float(row["heat_flux_cold"] or 0) for row in plot_rows])
@@ -151,8 +167,8 @@ def thermal_anomaly_chart(rows, volcano_name):
     heat_axis.plot(dates, heat_hot, "o--", color="#d62828", markersize=4, linewidth=1, alpha=0.9, label="Qhot / Heat Flux hot (W)")
     heat_axis.set_ylabel("Heat Flux (W)", color=MUTED, fontsize=9)
     flux_volume_axis.set_ylabel("Volume Flux (m³/s)", color=MUTED, fontsize=9)
-    heat_axis.set_ylim(0, max(6e9, float(max(heat_cold.max(), heat_hot.max())) * 1.08))
-    flux_volume_axis.set_ylim(0, max(6, float(max(volume_cold.max(), volume_hot.max())) * 1.08))
+    heat_axis.set_ylim(0, _adaptive_upper(_finite_max(np.r_[heat_cold, heat_hot])))
+    flux_volume_axis.set_ylim(0, _adaptive_upper(_finite_max(np.r_[volume_cold, volume_hot])))
     heat_axis.grid(True, color=GRID, linestyle=":", linewidth=0.8)
     heat_axis.legend(fontsize=8, ncol=2, loc="upper right")
 
@@ -165,14 +181,19 @@ def thermal_anomaly_chart(rows, volcano_name):
     midpoint = np.asarray([row["combined_midpoint"] for row in plot_rows])
     power_scale = float(plot_rows[0].get("combined_power_scale") or 1.0)
     volume_scale = float(plot_rows[0].get("combined_volume_scale") or 1.0)
-    power_axis.set_ylim(0, 1.05)
-    volume_axis.set_ylim(0, 1.05)
-    volume_axis.fill_between(dates, lower, upper, color="#8795dc", alpha=0.3, label="Envelope gabungan (batas bawah--atas)")
-    volume_axis.scatter(dates, midpoint, color=MEAN, s=22, zorder=5, label="Titik gabungan")
     fit_keys = sorted({
         key for row in plot_rows for key in row
         if key.startswith("combined_fit_") and "_slope_" not in key
     })
+    fit_values = []
+    for key in fit_keys:
+        fit_values.extend(float(row[key]) for row in plot_rows if row.get(key) is not None)
+    index_max = max(_finite_max(upper), _finite_max(midpoint), _finite_max(fit_values))
+    index_top = index_max * 1.1 if index_max > 0 else 1.05
+    power_axis.set_ylim(0, index_top)
+    volume_axis.set_ylim(0, index_top)
+    volume_axis.fill_between(dates, lower, upper, color="#8795dc", alpha=0.3, label="Envelope gabungan (batas bawah--atas)")
+    volume_axis.scatter(dates, midpoint, color=MEAN, s=22, zorder=5, label="Titik gabungan")
     for phase_index, key in enumerate(fit_keys):
         fit_dates = [dates[i] for i, row in enumerate(plot_rows) if row.get(key) is not None]
         fit_values = [row[key] for row in plot_rows if row.get(key) is not None]

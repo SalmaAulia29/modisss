@@ -358,6 +358,15 @@ function compactNumber(value) {
   return new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
+function maxFinite(values) {
+  let max = 0;
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > max) max = numeric;
+  }
+  return max;
+}
+
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const validDate = label && !Number.isNaN(new Date(label).getTime());
@@ -411,6 +420,8 @@ function ChartPanel({ volcano, rows }) {
     return { key, name: `Linear fitting fase ${index + 1}${Number.isFinite(Number(slope)) ? ` · slope ${formatSlope(slope)} indeks/hari` : ""}` };
   });
   const slopeSummary = fitLabels.map(({ name }) => name).join(" · ");
+  const maxIndex = maxFinite(data.flatMap((row) => [row.combined_midpoint, row.combined_envelope?.[1], ...fitKeys.map((key) => row[key])]));
+  const indexDomain = [0, maxIndex > 0 ? maxIndex * 1.1 : 1.05];
 
   return (
     <article className="surface overflow-hidden">
@@ -427,8 +438,8 @@ function ChartPanel({ volcano, rows }) {
             <ComposedChart data={data} margin={{ top: 5, right: 12, left: 34, bottom: 4 }}>
               <CartesianGrid stroke={chartTheme.grid} strokeDasharray="2 5" vertical={false} />
               <XAxis dataKey="observation_datetime" tickFormatter={shortDate} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={30} label={{ value: "Tanggal pengamatan", position: "insideBottom", offset: -2, fill: chartTheme.text, fontSize: 10 }} />
-              <YAxis yAxisId="power" domain={[0, 1.05]} includeHidden tickFormatter={(value) => compactNumber(value * (powerScale || 1))} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Power (J)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
-              <YAxis yAxisId="volume" orientation="right" domain={[0, 1.05]} includeHidden tickFormatter={(value) => compactNumber(value * (volumeScale || 1))} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Volume (m³)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis yAxisId="power" domain={indexDomain} includeHidden tickFormatter={(value) => compactNumber(value * (powerScale || 1))} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Power (J)", angle: -90, position: "insideLeft", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
+              <YAxis yAxisId="volume" orientation="right" domain={indexDomain} includeHidden tickFormatter={(value) => compactNumber(value * (volumeScale || 1))} stroke={chartTheme.grid} tick={{ fill: chartTheme.text, fontSize: 10 }} tickLine={false} axisLine={false} width={65} label={{ value: "Cumulative Volume (m³)", angle: 90, position: "insideRight", offset: 8, fill: chartTheme.text, fontSize: 10 }} />
               <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }} />
               <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: "10px", color: chartTheme.text, paddingTop: "12px" }} />
               <Area yAxisId="power" type="monotone" dataKey="combined_envelope" name="Envelope gabungan (batas bawah--atas)" stroke="none" fill="#8795dc" fillOpacity={0.30} activeDot={false} />
@@ -444,14 +455,14 @@ function ChartPanel({ volcano, rows }) {
 }
 
 const observationCharts = [
-  { key: "pixel_count", title: "(a) Jumlah Hotspot Terdeteksi", axis: "Jumlah pixel terdeteksi (pixel)", color: "#202938", unit: "pixel", label: "npixel", yMin: 10 },
-  { key: "max_b21", title: "(b) Spectral Radiance Maximum", axis: "B21max (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "B21max", yMin: 30 },
-  { key: "sum_b21", title: "(c) Spectral Radiance Total", axis: "Σ B21 (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "Σ B21", yMin: 50 },
+  { key: "pixel_count", title: "(a) Jumlah Hotspot Terdeteksi", axis: "Jumlah pixel terdeteksi (pixel)", color: "#202938", unit: "pixel", label: "npixel" },
+  { key: "max_b21", title: "(b) Spectral Radiance Maximum", axis: "B21max (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "B21max" },
+  { key: "sum_b21", title: "(c) Spectral Radiance Total", axis: "Σ B21 (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "Σ B21" },
 ];
 
 function ObservationChart({ volcano, rows, config }) {
-  const maxValue = rows.reduce((max, row) => Math.max(max, Number(row[config.key]) || 0), 0);
-  const yDomain = [0, Math.max(config.yMin, maxValue * 1.08)];
+  const maxValue = maxFinite(rows.map((row) => row[config.key]));
+  const yDomain = [0, maxValue > 0 ? maxValue * 1.1 : 1];
   return (
     <article className="surface overflow-hidden">
       <div className="border-b border-line px-5 py-4">
@@ -474,10 +485,10 @@ function ObservationChart({ volcano, rows, config }) {
 }
 
 function FluxChart({ volcano, rows }) {
-  const maxHeat = rows.reduce((max, row) => Math.max(max, Number(row.heat_flux_cold) || 0, Number(row.heat_flux_hot) || 0), 0);
-  const maxVolume = rows.reduce((max, row) => Math.max(max, Number(row.effusion_cold) || 0, Number(row.effusion_hot) || 0), 0);
-  const heatDomain = [0, Math.max(6e9, maxHeat * 1.08)];
-  const volumeDomain = [0, Math.max(6, maxVolume * 1.08)];
+  const maxHeat = maxFinite(rows.flatMap((row) => [row.heat_flux_cold, row.heat_flux_hot]));
+  const maxVolume = maxFinite(rows.flatMap((row) => [row.effusion_cold, row.effusion_hot]));
+  const heatDomain = [0, maxHeat > 0 ? maxHeat * 1.1 : 1];
+  const volumeDomain = [0, maxVolume > 0 ? maxVolume * 1.1 : 1];
   return (
     <article className="surface overflow-hidden xl:col-span-2">
       <div className="border-b border-line px-5 py-4">
