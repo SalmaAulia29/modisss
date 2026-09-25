@@ -46,17 +46,35 @@ function formatSlope(value) {
 }
 const today = new Date().toISOString().slice(0, 10);
 
+const CSV_BOM = "\uFEFF";
+
+function csvField(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replace(/\r\n|\r|\n/g, " ").replace(/"/g, '""')}"`;
+}
+
 function downloadCsv(filename, columns, rows) {
-  const escape = (value) => `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
-  const content = [
-    columns.map(([label]) => escape(label)).join(","),
-    ...rows.map((row) => columns.map(([, key]) => escape(row[key])).join(",")),
-  ].join("\n");
+  const lines = [
+    "sep=,",
+    columns.map(([label]) => csvField(label)).join(","),
+    ...rows.map((row) => columns.map(([, key]) => csvField(row[key])).join(",")),
+  ].join("\r\n");
+  const blob = new Blob([CSV_BOM + lines], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+  link.href = url;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(link.href);
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function slugify(text) {
+  return String(text || "")
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function formatValue(value, key) {
@@ -426,12 +444,14 @@ function ChartPanel({ volcano, rows }) {
   return (
     <article className="surface overflow-hidden">
       <div className="border-b border-line px-5 py-4">
-        <div>
-          <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-cyan" /><h3 className="text-sm font-semibold text-slate-950">(e) Cumulative Power &amp; Volume</h3></div>
-          <p className="mt-1 pl-3.5 text-[10px] uppercase tracking-[0.12em] text-muted">{volcano.name} · {data.length} titik data</p>
+          <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-cyan" /><h3 className="text-sm font-semibold text-slate-950">(e) Cumulative Volume dan Cumulative Power</h3></div>
+          <div className="mt-2 w-full max-w-none space-y-3 text-left text-xs leading-5 text-slate-600">
+            <p><span className="font-medium text-slate-800">Cumulative Volume:</span> Cumulative Volume menunjukkan akumulasi volume lava yang dihitung selama periode pengamatan.</p>
+            <p><span className="font-medium text-slate-800">Cumulative Power:</span> Cumulative Power menunjukkan akumulasi nilai panas/energi yang dihitung dari aktivitas termal selama periode pengamatan.</p>
+          </div>
+          <p className="mt-3 mb-1 pl-3.5 text-[10px] uppercase tracking-[0.14em] text-muted">{volcano.name} · {data.length} titik data</p>
           {slopeSummary && <p className="mt-2 pl-3.5 text-[11px] font-medium text-slate-600">{slopeSummary}</p>}
         </div>
-      </div>
       <div className="h-[330px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
         {data.length ? (
           <ResponsiveContainer width="100%" height="100%">
@@ -455,9 +475,35 @@ function ChartPanel({ volcano, rows }) {
 }
 
 const observationCharts = [
-  { key: "pixel_count", title: "(a) Jumlah Hotspot Terdeteksi", axis: "Jumlah pixel terdeteksi (pixel)", color: "#202938", unit: "pixel", label: "npixel" },
-  { key: "max_b21", title: "(b) Spectral Radiance Maximum", axis: "B21max (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "B21max" },
-  { key: "sum_b21", title: "(c) Spectral Radiance Total", axis: "Σ B21 (W/m² sr µm)", color: "#202938", unit: "W/m² sr µm", label: "Σ B21" },
+  {
+    key: "pixel_count",
+    title: "(a) Jumlah Hotspot Terdeteksi",
+    axis: "Jumlah pixel terdeteksi (pixel)",
+    color: "#202938",
+    unit: "pixel",
+    label: "npixel",
+    description: "Jumlah hotspot terdeteksi menunjukkan banyaknya titik panas yang berhasil diidentifikasi oleh MODVOLC dari data termal MODIS. Deteksi tidak ditentukan hanya oleh satu batas temperatur, tetapi menggunakan karakteristik radiance inframerah sekitar 4 µm dan 12 µm serta kriteria indeks termal (NTI). Oleh karena itu, jumlah hotspot terdeteksi tidak selalu merepresentasikan seluruh material atau lava yang keluar.",
+    source: "Sumber: Wright et al. (2004), MODVOLC",
+    sourceUrl: "https://www.sciencedirect.com/science/article/pii/S0377027304000289",
+  },
+  {
+    key: "max_b21",
+    title: "(b) Spectral Radiance B21",
+    axis: "B21max (W/m² sr µm)",
+    color: "#202938",
+    unit: "W/m² sr µm",
+    label: "B21max",
+    description: "Spectral Radiance B21 menunjukkan besarnya radiasi termal yang terdeteksi sensor MODIS pada Band 21. Parameter ini digunakan sebagai salah satu dasar dalam analisis aktivitas termal.",
+  },
+  {
+    key: "sum_b21",
+    title: "(c) Total Spectral Radiance",
+    axis: "Σ B21 (W/m² sr µm)",
+    color: "#202938",
+    unit: "W/m² sr µm",
+    label: "Σ B21",
+    description: "Total Spectral Radiance menunjukkan jumlah keseluruhan nilai spectral radiance B21 (ΣB21) dari hotspot yang terdeteksi pada periode pengamatan. Nilai ini digunakan dalam proses perhitungan parameter panas dan estimasi volume.",
+  },
 ];
 
 function ObservationChart({ volcano, rows, config }) {
@@ -467,7 +513,15 @@ function ObservationChart({ volcano, rows, config }) {
     <article className="surface overflow-hidden">
       <div className="border-b border-line px-5 py-4">
         <h3 className="text-sm font-semibold text-slate-950">{config.title}</h3>
-        <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-muted">{volcano.name} · {rows.length} titik data</p>
+        {config.description && <p className="mt-2 w-full max-w-none text-left text-xs leading-5 text-slate-600">{config.description}</p>}
+        {config.source && (
+          <p className="mt-2 text-[10px] font-medium text-slate-500">
+            {config.sourceUrl
+              ? <a href={config.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-slate-500 underline decoration-slate-400/60 underline-offset-2 transition-colors hover:text-cyan hover:decoration-cyan">{config.source}</a>
+              : config.source}
+          </p>
+        )}
+        <p className="mt-3 mb-1 text-[10px] uppercase tracking-[0.14em] text-muted">{volcano.name} · {rows.length} titik data</p>
       </div>
       <div className="h-[280px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
         {rows.length ? <ResponsiveContainer width="100%" height="100%">
@@ -492,8 +546,12 @@ function FluxChart({ volcano, rows }) {
   return (
     <article className="surface overflow-hidden xl:col-span-2">
       <div className="border-b border-line px-5 py-4">
-        <h3 className="text-sm font-semibold text-slate-950">(d) Heat &amp; Volume Flux</h3>
-        <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-muted">{volcano.name} · {rows.length} titik data</p>
+        <h3 className="text-sm font-semibold text-slate-950">(d) Heat Flux dan Volume Flux</h3>
+        <div className="mt-2 w-full max-w-none space-y-3 text-left text-xs leading-5 text-slate-600">
+          <p><span className="font-medium text-slate-800">Heat Flux:</span> Heat Flux menunjukkan laju pelepasan energi panas dari aktivitas termal yang terdeteksi.</p>
+          <p><span className="font-medium text-slate-800">Volume Flux:</span> Volume Flux menunjukkan laju keluarnya volume lava atau material vulkanik terhadap waktu.</p>
+        </div>
+        <p className="mt-3 mb-1 text-[10px] uppercase tracking-[0.14em] text-muted">{volcano.name} · {rows.length} titik data</p>
       </div>
       <div className="h-[300px] bg-slate-50 px-2 pb-2 pt-5 sm:px-4">
         {rows.length ? <ResponsiveContainer width="100%" height="100%">
@@ -618,7 +676,7 @@ function Dashboard() {
     setAppliedFilters(filters);
     setActivePanel("");
   };
-  const saveModis = () => downloadCsv(`data-modis-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, MODIS_COLUMNS, selectedRows);
+  const saveModis = () => downloadCsv(`data-modis-${slugify(selectedVolcano?.name) || "semua-gunung"}-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, MODIS_COLUMNS, selectedRows);
   const saveCalculations = async () => {
     const response = await fetch("/api/lava-volume");
     const payload = await response.json();
@@ -626,7 +684,7 @@ function Dashboard() {
       const rowDate = String(row.observation_datetime).slice(0, 10);
       return String(row.volcano_id) === appliedFilters.volcano && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
     });
-    downloadCsv(`perhitungan-mean-e-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, LAVA_COLUMNS, recalculateFilteredRows(rows));
+    downloadCsv(`data-perhitungan-${slugify(selectedVolcano?.name) || "semua-gunung"}-${appliedFilters.startDate}-${appliedFilters.endDate}.csv`, LAVA_COLUMNS, recalculateFilteredRows(rows));
   };
   const calculationUrl = appliedFilters ? (() => {
     const params = new URLSearchParams({ start: appliedFilters.startDate, end: appliedFilters.endDate });
