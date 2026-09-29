@@ -482,9 +482,7 @@ const observationCharts = [
     color: "#202938",
     unit: "pixel",
     label: "npixel",
-    description: "Jumlah hotspot terdeteksi menunjukkan banyaknya titik panas yang berhasil diidentifikasi oleh MODVOLC dari data termal MODIS. Deteksi tidak ditentukan hanya oleh satu batas temperatur, tetapi menggunakan karakteristik radiance inframerah sekitar 4 µm dan 12 µm serta kriteria indeks termal (NTI). Oleh karena itu, jumlah hotspot terdeteksi tidak selalu merepresentasikan seluruh material atau lava yang keluar.",
-    source: "Sumber: Wright et al. (2004), MODVOLC",
-    sourceUrl: "https://www.sciencedirect.com/science/article/pii/S0377027304000289",
+    description: "Jumlah hotspot terdeteksi menunjukkan banyaknya titik panas yang berhasil diidentifikasi oleh MODVOLC dari data termal MODIS. Proses deteksi dilakukan dengan menganalisis karakteristik radiasi termal pada kanal inframerah sekitar 4 µm dan 12 µm untuk membedakan piksel yang memiliki anomali termal dari kondisi permukaan di sekitarnya. Salah satu kriteria yang digunakan dalam proses tersebut adalah Normalized Thermal Index (NTI), yang diperoleh dari perbandingan radiance pada kedua kanal tersebut. Nilai threshold NTI digunakan untuk membantu menentukan piksel yang ditandai sebagai hotspot. Oleh karena itu, jumlah hotspot terdeteksi tidak selalu merepresentasikan seluruh material atau lava yang keluar.",
   },
   {
     key: "max_b21",
