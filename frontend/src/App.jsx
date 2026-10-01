@@ -390,15 +390,19 @@ function ChartTooltip({ active, payload, label }) {
   const validDate = label && !Number.isNaN(new Date(label).getTime());
   const row = payload[0]?.payload || {};
   const details = [
-    ["Cold Effusion Rate", row.effusion_cold, "m³/s", "#1565c0"], ["Hot Effusion Rate", row.effusion_hot, "m³/s", "#d62828"], ["Cumulative Volume", row.mean_e, "m³", chartTheme.mean],
-    ["Cold Heat Flux", row.heat_flux_cold, "W", "#1565c0"], ["Hot Heat Flux", row.heat_flux_hot, "W", "#d62828"], ["Cumulative Power", row.mean_q, "J", chartTheme.mean],
+    ["Cumulative Volume", row.mean_e, "m³", chartTheme.mean],
+    ["Cumulative Power", row.mean_q, "J", chartTheme.mean],
   ].filter(([, value]) => Number.isFinite(Number(value)));
   const fitItems = Object.entries(row).filter(([key, value]) => key.startsWith("combined_fit_slope_") && Number.isFinite(Number(value)));
+  const envelope = (Array.isArray(row.combined_envelope) ? row.combined_envelope : []).map(Number).filter(Number.isFinite);
+  const lowerBound = envelope.length ? Math.min(...envelope) : null;
+  const upperBound = envelope.length ? Math.max(...envelope) : null;
   return (
     <div className="rounded-xl border border-line bg-white p-3 text-xs shadow-lg">
       <p className="mb-2 font-medium text-slate-700">{validDate ? new Date(label).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Waktu tidak tersedia"}</p>
-      <p style={{ color: "#8795dc" }}>Envelope gabungan: {number.format(row.combined_envelope?.[0])} - {number.format(row.combined_envelope?.[1])}</p>
-      <p style={{ color: chartTheme.mean }}>Titik gabungan: {number.format(row.combined_midpoint)}</p>
+      <p style={{ color: "#8795dc" }}>Batas Bawah: {lowerBound === null ? "-" : number.format(lowerBound)}</p>
+      <p style={{ color: "#8795dc" }}>Batas Atas: {upperBound === null ? "-" : number.format(upperBound)}</p>
+      <p style={{ color: chartTheme.mean }}>Titik Tengah: {number.format(row.combined_midpoint)}</p>
       {details.map(([name, value, unit, color]) => <p key={name} style={{ color }}>{name}: {number.format(value)} {unit}</p>)}
       {fitItems.map(([key, value]) => <p key={key} style={{ color: chartTheme.mean }}>Gradien/Slope fase {key.replace("combined_fit_slope_", "")}: {formatSlope(value)} indeks/hari</p>)}
     </div>
