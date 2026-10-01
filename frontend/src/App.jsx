@@ -390,8 +390,8 @@ function ChartTooltip({ active, payload, label }) {
   const validDate = label && !Number.isNaN(new Date(label).getTime());
   const row = payload[0]?.payload || {};
   const details = [
-    ["Ecold", row.effusion_cold, "m³/s", "#1565c0"], ["Ehot", row.effusion_hot, "m³/s", "#d62828"], ["Mean E kumulatif", row.mean_e, "m³", chartTheme.mean],
-    ["Qcold", row.heat_flux_cold, "W", "#1565c0"], ["Qhot", row.heat_flux_hot, "W", "#d62828"], ["Mean Q kumulatif", row.mean_q, "J", chartTheme.mean],
+    ["Cold Effusion Rate", row.effusion_cold, "m³/s", "#1565c0"], ["Hot Effusion Rate", row.effusion_hot, "m³/s", "#d62828"], ["Cumulative Volume", row.mean_e, "m³", chartTheme.mean],
+    ["Cold Heat Flux", row.heat_flux_cold, "W", "#1565c0"], ["Hot Heat Flux", row.heat_flux_hot, "W", "#d62828"], ["Cumulative Power", row.mean_q, "J", chartTheme.mean],
   ].filter(([, value]) => Number.isFinite(Number(value)));
   const fitItems = Object.entries(row).filter(([key, value]) => key.startsWith("combined_fit_slope_") && Number.isFinite(Number(value)));
   return (
