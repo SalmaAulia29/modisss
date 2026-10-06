@@ -4,3 +4,10 @@ __pycache__
 node_modules/
 dist/
 .vite/
+
+# Editor dan sistem operasi
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
