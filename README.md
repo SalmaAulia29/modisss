@@ -2,7 +2,7 @@
 
 **Studi Kasus: Gunung Ibu dan Gunung Lewotolok**
 
-Sistem berbasis web untuk memantau hotspot MODIS dan mengestimasi keluaran lava pada dua gunungapi di Indonesia. Dikembangkan sebagai bagian dari kegiatan Kerja Praktik di Pusat Vulkanologi dan Mitigasi Bencana Geologi (PVMBG).
+Sistem berbasis web untuk memantau hotspot MODIS dan mengestimasi keluaran lava pada dua gunungapi di Indonesia. Dikembangkan sebagai bagian dari kegiatan Kerja Praktik di Pusat Vulkanologi dan Mitigasi Bencana Geologi (PVMBG)dengan supervisi oleh Dr. Devy Kamil Syahbana.
 
 ---
 
