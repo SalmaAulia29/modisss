@@ -516,7 +516,7 @@ Detail skenario, hasil, dan tangkapan layarnya ada di **BAB IV** [Laporan Kerja 
 
 ## Developer
 
-Dikembangkan dalam kegiatan Kerja Praktik di **Pusat Vulkanologi dan Mitigasi Bencana Geologi (PVMBG)**.
+Dikembangkan dalam kegiatan Kerja Praktik di **Pusat Vulkanologi dan Mitigasi Bencana Geologi (PVMBG)** dengan supervisi oleh Dr. Devy Kamil Syahbana.
 
 | Nama | NIM |
 | --- | --- |
