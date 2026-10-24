@@ -12,6 +12,8 @@ import {
   YAxis,
 } from "recharts";
 
+import pvmbgLogo from "./assets/PVMBG-logo.svg";
+
 const DemHotspot3D = lazy(() => import("./DemHotspot3D"));
 
 const MODIS_COLUMNS = [
@@ -44,7 +46,31 @@ function formatSlope(value) {
   if (numericValue !== 0 && Math.abs(numericValue) < 0.01) return numericValue.toExponential(4).replace(".", ",");
   return detailNumber.format(numericValue);
 }
-const today = new Date().toISOString().slice(0, 10);
+const MIN_DATE = "2026-01-01";
+
+function localDateString() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function validatePeriod(values) {
+  const errors = {};
+  const today = localDateString();
+  const check = (key, label) => {
+    const value = values[key];
+    if (!value) errors[key] = `${label} belum diisi.`;
+    else if (value < MIN_DATE) errors[key] = `${label} tidak boleh sebelum 1 Januari 2026.`;
+    else if (value > today) errors[key] = `${label} tidak boleh melewati hari ini.`;
+  };
+  check("startDate", "Tanggal awal");
+  check("endDate", "Tanggal akhir");
+  if (!errors.startDate && !errors.endDate && values.startDate > values.endDate) {
+    errors.startDate = "Tanggal awal tidak boleh lebih besar dari tanggal akhir.";
+    errors.endDate = "Tanggal akhir tidak boleh lebih kecil dari tanggal awal.";
+  }
+  return errors;
+}
 
 const CSV_BOM = "\uFEFF";
 
@@ -206,10 +232,9 @@ function AppShell({ page, children, systemOnline = true }) {
     <div className="min-h-screen">
       {menuOpen && <button type="button" aria-label="Tutup menu" onClick={closeMenu} className="fixed inset-0 z-40 cursor-default bg-slate-950/25 backdrop-blur-[1px]" />}
       <aside className={`fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col border-r border-line bg-white px-5 py-7 shadow-2xl transition-transform duration-200 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between">
         <a href="/" className="flex items-center gap-3 px-2 text-slate-950">
-          <span className="grid h-10 w-10 place-items-center rounded-xl border border-cyan/30 bg-cyan/10 text-cyan"><Icon name="mountain" /></span>
-          <span><strong className="block text-sm tracking-wide">MODIS</strong><small className="text-[10px] uppercase tracking-[0.18em] text-muted">Volcano Monitor</small></span>
+          <img src={pvmbgLogo} alt="Logo PVMBG" className="h-9 w-auto shrink-0 object-contain" />
         </a>
           <button type="button" aria-label="Tutup menu" onClick={closeMenu} className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-card hover:text-slate-950"><Icon name="close" className="h-5 w-5" /></button>
         </div>
@@ -225,12 +250,12 @@ function AppShell({ page, children, systemOnline = true }) {
 
       <div className="min-w-0">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-line bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-9">
-          <div className="flex items-center gap-3"><button type="button" aria-label="Buka menu" onClick={() => setMenuOpen(true)} className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-panel text-slate-700 transition-colors hover:border-cyan/40 hover:text-cyan"><Icon name="menu" /></button><a href="/" className="flex items-center gap-2 font-semibold text-slate-950"><span className="text-cyan"><Icon name="mountain" /></span><span className="hidden sm:inline">MODIS Monitor</span><span className="sm:hidden">MODIS</span></a></div>
-          <div className="hidden items-center gap-3 text-xs sm:flex"><span className="text-muted">{page === "dashboard" ? "Dashboard" : page === "monitoring" ? "Monitoring" : "Perhitungan Effusion Rate Lava"}</span><span className={`h-2 w-2 rounded-full ${systemOnline ? "bg-emerald-500" : "bg-danger"}`} /></div>
+          <div className="flex items-center gap-3"><button type="button" aria-label="Buka menu" onClick={() => setMenuOpen(true)} className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-panel text-slate-700 transition-colors hover:border-cyan/40 hover:text-cyan"><Icon name="menu" /></button><a href="/" className="flex items-center gap-2 font-semibold text-slate-950"><img src={pvmbgLogo} alt="Logo PVMBG" className="h-8 w-auto shrink-0 object-contain" /></a></div>
+          <div className="hidden items-center gap-3 text-xs sm:flex"><span className="text-muted">{page === "dashboard" ? "Dashboard" : page === "monitoring" ? "Monitoring" : "Detail Perhitungan Estimasi Volume Lava"}</span><span className={`h-2 w-2 rounded-full ${systemOnline ? "bg-emerald-500" : "bg-danger"}`} /></div>
         </header>
         <main className="mx-auto max-w-[1540px] px-4 py-7 sm:px-6 lg:px-9 lg:py-9">
           {children}
-          <footer className="mt-12 flex flex-col gap-2 border-t border-line pt-5 text-[10px] uppercase tracking-[0.12em] text-slate-500 sm:flex-row sm:justify-between"><span>MODIS Volcano Monitor</span><span>Data otomatis · Asia/Jakarta</span></footer>
+          <footer className="mt-12 flex flex-col gap-2 border-t border-line pt-5 text-[10px] uppercase tracking-[0.12em] text-slate-500 sm:flex-row sm:justify-between"><span>PVMBG</span><span>Data otomatis · Asia/Jakarta</span></footer>
         </main>
       </div>
     </div>
@@ -628,23 +653,29 @@ function Charts({ volcanoes, chartData, dashboard = false, filters }) {
   );
 }
 
-function DashboardFilter({ volcanoes, values, onChange, onSubmit }) {
+function DashboardFilter({ volcanoes, values, onChange, onSubmit, errors = {} }) {
+  const today = localDateString();
+  const controlClass = (hasError) => `mt-2 h-11 w-full rounded-xl border bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan${hasError ? " border-danger" : " border-line"}`;
+  const messageClass = "mt-1 block text-[11px] font-semibold text-danger";
   return (
     <form onSubmit={onSubmit} className="relative z-10 -mt-8 mx-4 grid gap-4 rounded-2xl border border-white/70 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.13)] sm:mx-8 sm:grid-cols-[1.2fr_1fr_1fr_auto] sm:items-end lg:mx-14 lg:p-5">
       <label className="text-xs font-semibold text-slate-700">
         Gunung
-        <select value={values.volcano} onChange={(event) => onChange("volcano", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan">
-          <option value="">Pilih gunung</option>
+        <select value={values.volcano} onChange={(event) => onChange("volcano", event.target.value)} className={`${controlClass(Boolean(errors.volcano))} cursor-pointer${values.volcano ? "" : " text-slate-400"}`}>
+          <option value="" disabled>Pilih gunung</option>
           {volcanoes.map((volcano) => <option value={String(volcano.id)} key={volcano.id}>{volcano.name}</option>)}
         </select>
+        {errors.volcano && <span className={messageClass}>{errors.volcano}</span>}
       </label>
       <label className="text-xs font-semibold text-slate-700">
         Mulai periode
-        <input type="date" min="2026-01-01" max={today} value={values.startDate} onChange={(event) => onChange("startDate", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan" />
+        <input type="date" min={MIN_DATE} max={today} value={values.startDate} onChange={(event) => onChange("startDate", event.target.value)} className={controlClass(Boolean(errors.startDate))} />
+        {errors.startDate && <span className={messageClass}>{errors.startDate}</span>}
       </label>
       <label className="text-xs font-semibold text-slate-700">
         Sampai
-        <input type="date" min={values.startDate || "2026-01-01"} max={today} value={values.endDate} onChange={(event) => onChange("endDate", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-line bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-cyan" />
+        <input type="date" min={values.startDate || MIN_DATE} max={today} value={values.endDate} onChange={(event) => onChange("endDate", event.target.value)} className={controlClass(Boolean(errors.endDate))} />
+        {errors.endDate && <span className={messageClass}>{errors.endDate}</span>}
       </label>
       <button type="submit" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-cyan px-5 text-xs font-bold text-white transition-colors hover:bg-slate-950"><Icon name="arrow" className="h-4 w-4 rotate-90" />Tampilkan data</button>
     </form>
@@ -658,7 +689,8 @@ function ActionCard({ icon, title, description, onClick, href, disabled = false 
 }
 
 function Dashboard() {
-  const [filters, setFilters] = useState({ volcano: "", startDate: "2026-01-01", endDate: today });
+  const [filters, setFilters] = useState(() => ({ volcano: "", startDate: localDateString(), endDate: localDateString() }));
+  const [filterErrors, setFilterErrors] = useState({});
   const [appliedFilters, setAppliedFilters] = useState(null);
   const [activePanel, setActivePanel] = useState("");
   const dashboardUrl = appliedFilters
@@ -672,9 +704,28 @@ function Dashboard() {
     const rowDate = String(row.datetime).slice(0, 10);
     return String(data.volcanoes.find((volcano) => volcano.name === row.volcano_name)?.id) === appliedFilters.volcano && rowDate >= appliedFilters.startDate && rowDate <= appliedFilters.endDate;
   }) : [];
+  const handleFilterChange = (key, value) => {
+    setFilters((current) => ({ ...current, [key]: value }));
+    setFilterErrors((current) => {
+      if (!Object.keys(current).length) return current;
+      const next = { ...current };
+      if (key === "volcano") delete next.volcano;
+      else {
+        delete next.startDate;
+        delete next.endDate;
+      }
+      return next;
+    });
+  };
   const applyFilters = (event) => {
     event.preventDefault();
-    if (!filters.volcano) return;
+    const errors = { ...validatePeriod(filters) };
+    if (!filters.volcano) errors.volcano = "Anda belum memilih gunung api.";
+    if (Object.keys(errors).length) {
+      setFilterErrors(errors);
+      return;
+    }
+    setFilterErrors({});
     setAppliedFilters(filters);
     setActivePanel("");
   };
@@ -703,7 +754,7 @@ function Dashboard() {
         <div className="pointer-events-none absolute -right-8 -bottom-12 text-[#1b525b]/80 sm:right-8"><Icon name="mountain" className="h-56 w-56 sm:h-72 sm:w-72" /></div>
         <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full border border-white/10" />
       </section>
-      <DashboardFilter volcanoes={data.volcanoes} values={filters} onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))} onSubmit={applyFilters} />
+      <DashboardFilter volcanoes={data.volcanoes} values={filters} errors={filterErrors} onChange={handleFilterChange} onSubmit={applyFilters} />
       {appliedFilters && <>
         {selectedVolcano && (
           <Suspense fallback={<div className="surface mt-10 grid h-40 place-items-center text-sm text-muted"><span className="mr-3 h-4 w-4 animate-spin rounded-full border-2 border-cyan border-t-transparent" />Memuat peta 3D…</div>}>
@@ -753,8 +804,8 @@ function LavaVolume() {
   const filteredCalculations = recalculateFilteredRows(data.calculations.filter((row) => String(row.volcano_id) === filters.volcano && isInPeriod(row)));
   return (
     <AppShell page="lava">
-      <PageHeading eyebrow="Data calculation" title="Detail Perhitungan Effusion Rate Lava" description="Tabel hasil perhitungan estimasi effusion rate lava berdasarkan data MODIS." refreshing={refreshing} onRefresh={load} />
-      <section id="detail-perhitungan" className="mt-10 scroll-mt-6"><SectionTitle index="03" title="Detail perhitungan" subtitle={`${filteredCalculations.length} baris sesuai gunung dan periode terpilih`} /><DataTable columns={LAVA_COLUMNS} rows={filteredCalculations} empty="Belum ada hasil perhitungan." /></section>
+          <PageHeading eyebrow="Data calculation" title="Detail Perhitungan Estimasi Volume Lava" description="Tabel hasil perhitungan estimasi volume lava berdasarkan data MODIS." refreshing={refreshing} onRefresh={load} />
+          <section id="detail-perhitungan" className="mt-10 scroll-mt-6"><SectionTitle index="03" title="Detail Perhitungan Estimasi Volume Lava" subtitle={`${filteredCalculations.length} baris sesuai gunung dan periode terpilih`} /><DataTable columns={LAVA_COLUMNS} rows={filteredCalculations} empty="Belum ada hasil perhitungan." /></section>
     </AppShell>
   );
 }
